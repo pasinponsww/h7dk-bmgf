@@ -1,0 +1,8 @@
+[package]
+name = "geometry"
+version.workspace = true
+edition.workspace = true
+description = "UI/UX Display object"
+
+[lints]
+workspace = true

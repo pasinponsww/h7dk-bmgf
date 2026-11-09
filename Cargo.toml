@@ -1,17 +1,70 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+description = "H7-DK Application"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "h7dk-fw"
+path = "src/main.rs"
+required-features = ["firmware"]
+test = false
+bench = false
+
+[features]
+firmware = [
+    "dep:bsp",
+    "dep:ui",
+    "dep:cortex-m",
+    "dep:cortex-m-rt",
+    "dep:defmt",
+    "dep:defmt-rtt",
+    "dep:panic-probe",
+]
+
+[dependencies]
+geometry = { path = "crates/geometry" }
+rng = { path = "crates/rng" }
+bsp = { path = "crates/bsp", optional = true }
+ui = { path = "ui", optional = true }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"], optional = true }
+cortex-m-rt = { version = "0.7", optional = true }
+defmt = { version = "0.3", optional = true }
+defmt-rtt = { version = "0.4", optional = true }
+panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
+
+[build-dependencies]
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[dev-dependencies]
+ui = { path = "ui" }
+sim = { path = "sim" }
+xtask = { path = "xtask" }
+embedded-graphics = { version = "0.8", default-features = false }
+
+[lints]
+workspace = true
+
 [workspace]
 resolver = "2"
 members = [
-    "crates/app-core",
-    "crates/content",
-    "crates/ui",
-    "crates/firmware",
-    "crates/sim",
+    "ui",
+    "sim",
+    "xtask",
+    "crates/geometry",
+    "crates/rng",
+    "crates/bsp",
 ]
-
 default-members = [
-    "crates/app-core",
-    "crates/content",
-    "crates/ui",
+    ".",
+    "ui",
+    "sim",
+    "xtask",
+    "crates/geometry",
+    "crates/rng",
 ]
 
 [workspace.package]
