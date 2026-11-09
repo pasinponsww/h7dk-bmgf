@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app-core",
+    "crates/content",
+    "crates/ui",
+    "crates/firmware",
+    "crates/sim",
+]
+
+default-members = [
+    "crates/app-core",
+    "crates/content",
+    "crates/ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev]
+opt-level = "s"
+debug = 2
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 2
