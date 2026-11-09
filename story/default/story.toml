@@ -1,0 +1,36 @@
+[[chapter]]
+title = "The beginning"
+
+[[chapter.object]]
+icon = "door"
+line = "Replace this with how it started. Keep each line short."
+
+[[chapter.object]]
+icon = "sparkle"
+line = "Every object on the screen holds one line like this."
+
+[[chapter.object]]
+icon = "chat-circle-dots"
+line = "Tap an object to read its line. Find them all to go on."
+
+[[chapter]]
+title = "Something together"
+
+[[chapter.object]]
+icon = "calendar-heart"
+line = "Add a memory here."
+
+[[chapter.object]]
+icon = "ice-cream"
+line = "Add another one here."
+
+[[chapter]]
+title = "Now"
+
+[[chapter.object]]
+icon = "star"
+line = "Say what you like about them."
+
+[[chapter.object]]
+icon = "heart"
+line = "End on something kind."
