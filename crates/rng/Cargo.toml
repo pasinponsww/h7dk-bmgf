@@ -1,0 +1,8 @@
+[package]
+name = "rng"
+version.workspace = true
+edition.workspace = true
+description = "A tiny random number trait with a deterministic generator. no_std, no dependencies."
+
+[lints]
+workspace = true
