@@ -1,5 +1,6 @@
-//! The application state and its tuning constants. This is what RTIC would
-//! call the shared resources: every task reads and writes it.
+//! The application state and its tuning constants. In the firmware the
+//! `Model` is an RTIC shared resource: every task reads and writes it, and RTIC
+//! makes sure two tasks never do so at the same time.
 
 use geometry::Rect;
 
@@ -135,4 +136,43 @@ pub fn yes_rect(dodges: u8) -> Rect {
     let w = i16::try_from(150 * pct / 100).unwrap_or(150);
     let h = i16::try_from(56 * pct / 100).unwrap_or(56);
     Rect::new(60 + 75 - w / 2, 176 + 28 - h / 2, w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::yes_rect;
+    use crate::common::testing::{Fake, Rig, CH0};
+    use geometry::Rect;
+
+    #[test]
+    fn yes_grows_six_percent_per_dodge_up_to_150() {
+        assert_eq!(yes_rect(0), Rect::new(60, 176, 150, 56));
+        assert_eq!(yes_rect(5).w, 195);
+        assert_eq!(yes_rect(200).w, 225);
+    }
+
+    #[test]
+    fn yes_grows_around_its_centre() {
+        let center = |r: Rect| (r.x + r.w / 2, r.y + r.h / 2);
+        assert_eq!(center(yes_rect(0)), center(yes_rect(5)));
+    }
+
+    #[test]
+    fn next_unlocked_follows_found_objects_and_resets_each_chapter() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        assert!(!r.m.next_unlocked(&Fake));
+        r.tap_rect(CH0[0]);
+        assert!(!r.m.next_unlocked(&Fake));
+        r.tap_rect(CH0[1]);
+        assert!(r.m.next_unlocked(&Fake));
+        r.tap_next();
+        assert!(!r.m.next_unlocked(&Fake), "next chapter is locked again");
+    }
+
+    #[test]
+    fn next_is_never_unlocked_outside_the_story() {
+        let r = Rig::new();
+        assert!(!r.m.next_unlocked(&Fake));
+    }
 }

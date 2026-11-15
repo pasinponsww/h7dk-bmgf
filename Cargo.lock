@@ -61,14 +61,13 @@ dependencies = [
  "cortex-m-rt",
  "defmt 0.3.101",
  "defmt-rtt",
- "embedded-graphics",
  "geometry",
  "panic-probe",
  "rng",
- "sim",
+ "rtic",
+ "rtic-monotonics",
  "toml",
  "ui",
- "xtask",
 ]
 
 [[package]]
@@ -129,6 +128,12 @@ name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
+
+[[package]]
+name = "cfg-if"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "clap"
@@ -333,6 +338,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
 
 [[package]]
+name = "embedded-hal-async"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "embedded-storage"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -360,6 +374,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e639847d312d9a82d2e75b0edcc1e934efcc64e6cb7aa94f0b1fbec0bc231d6"
 dependencies = [
  "gcd",
+]
+
+[[package]]
+name = "futures-core"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e"
+
+[[package]]
+name = "futures-task"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
+
+[[package]]
+name = "futures-util"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -459,6 +496,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pin-project-lite"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "portable-atomic"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -479,6 +528,74 @@ dependencies = [
 [[package]]
 name = "rng"
 version = "0.1.0"
+
+[[package]]
+name = "rtic"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373a07d594255d32df5bf7d140c51cf215082aacf29665d7b6a0e318c321853d"
+dependencies = [
+ "cortex-m",
+ "critical-section",
+ "portable-atomic",
+ "rtic-core",
+ "rtic-macros",
+]
+
+[[package]]
+name = "rtic-common"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc8f0cd269e918a4d7791f8b9fda8a6c8bd96b657e125eada6e2d5d51bd8120b"
+dependencies = [
+ "critical-section",
+ "portable-atomic",
+]
+
+[[package]]
+name = "rtic-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9369355b04d06a3780ec0f51ea2d225624db777acbc60abd8ca4832da5c1a42"
+
+[[package]]
+name = "rtic-macros"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60ff622649d3c9ffb692a9aa13d1d54fb88923ea43dcf12c09af3371b054f92b"
+dependencies = [
+ "indexmap",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "rtic-monotonics"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d12a5e827e4a491affc0296b7c33242f03c02ef70150f93912cc9c77bb071f65"
+dependencies = [
+ "cfg-if",
+ "cortex-m",
+ "fugit",
+ "portable-atomic",
+ "rtic-time",
+]
+
+[[package]]
+name = "rtic-time"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61485474f5a23247ae1d4875f2bfe860be9b3030dbf87c232e50799e021429a1"
+dependencies = [
+ "critical-section",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "fugit",
+ "futures-util",
+ "rtic-common",
+]
 
 [[package]]
 name = "rustc_version"

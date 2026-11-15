@@ -3,7 +3,6 @@
 //! Generic on purpose: nothing here knows about any one screen or project.
 
 #![no_std]
-#![warn(missing_docs)]
 
 pub mod place;
 
@@ -63,5 +62,43 @@ impl Rect {
             && self.x + self.w + pad > other.x
             && self.y < other.y + other.h + pad
             && self.y + self.h + pad > other.y
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contains_includes_border() {
+        let r = Rect::new(10, 10, 20, 20);
+        assert!(r.contains(Point::new(10, 10)));
+        assert!(r.contains(Point::new(30, 30)));
+        assert!(!r.contains(Point::new(31, 20)));
+    }
+
+    #[test]
+    fn distance_is_zero_inside_and_grows_outside() {
+        let r = Rect::new(100, 100, 50, 50);
+        assert_eq!(r.dist_sq(Point::new(120, 120)), 0);
+        assert_eq!(r.dist_sq(Point::new(90, 125)), 100);
+        assert_eq!(r.dist_sq(Point::new(90, 90)), 200);
+        assert_eq!(r.dist_sq(Point::new(160, 125)), 100);
+    }
+
+    #[test]
+    fn overlap_respects_padding() {
+        let a = Rect::new(0, 0, 10, 10);
+        let b = Rect::new(20, 0, 10, 10);
+        assert!(!a.overlaps(&b, 0));
+        assert!(a.overlaps(&b, 11));
+    }
+
+    #[test]
+    fn touching_edges_do_not_overlap_without_padding() {
+        let a = Rect::new(0, 0, 10, 10);
+        let b = Rect::new(10, 0, 10, 10);
+        assert!(!a.overlaps(&b, 0));
+        assert!(a.overlaps(&b, 1));
     }
 }

@@ -47,7 +47,7 @@ fn opt(v: Option<u8>) -> i32 {
     v.map_or(-1, i32::from)
 }
 
-// Control 
+// Control
 
 /// Starts over on the intro screen.
 #[no_mangle]
@@ -305,4 +305,51 @@ pub extern "C" fn line_ptr(ch: u32, i: u32) -> u32 {
 #[no_mangle]
 pub extern "C" fn line_len(ch: u32, i: u32) -> u32 {
     text(ch, i as i32, 0).len() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_to_reaches_each_scene_using_the_real_rules() {
+        let last = chapter_count() - 1;
+        sim_skip_to(1, last, 0);
+        assert_eq!((scene(), chapter()), (1, last));
+        sim_skip_to(2, 0, 0);
+        assert_eq!(scene(), 2);
+        sim_skip_to(3, 0, 0);
+        assert_eq!(scene(), 3);
+        sim_skip_to(0, 0, 0);
+        assert_eq!(scene(), 0);
+    }
+
+    #[test]
+    fn touch_and_effects_round_trip() {
+        sim_init(5, 0);
+        sim_touch(240, 136);
+        assert_eq!(scene(), 1);
+        assert_ne!(fx_flags() & 2, 0, "scene changed flag");
+        let x = hotspot_rect(0, 1, 0) + 5;
+        let y = hotspot_rect(0, 1, 1) + 5;
+        sim_touch(x, y);
+        assert_eq!(fx_reveal(), 1);
+        assert_eq!(shown(), 1);
+        assert_eq!(found(), 0b10);
+        assert_eq!(fx_led(), 0b11, "both LEDs flash");
+        assert_eq!(next_unlocked(), 0);
+    }
+
+    #[test]
+    fn strings_are_readable_from_their_pointers() {
+        assert_eq!(title_len(0) as usize, CHAPTERS[0].title.len());
+        assert_eq!(line_len(0, 0) as usize, CHAPTERS[0].hotspots[0].line.len());
+        assert_eq!(icon_len(0, 0) as usize, CHAPTERS[0].hotspots[0].icon.len());
+        assert_eq!(title_len(999), 0, "out of range is safe");
+    }
+
+    #[test]
+    fn the_exported_counts_match_the_story() {
+        assert_eq!(chapter_count() as usize, CHAPTERS.len());
+    }
 }

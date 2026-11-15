@@ -62,3 +62,101 @@ fn span(area: i16, size: i16) -> u32 {
 fn offset(random: u32, span: u32) -> i16 {
     i16::try_from((random >> 8) % span).unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Lcg(u32);
+
+    impl Lcg {
+        fn next(&mut self) -> u32 {
+            self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            self.0
+        }
+    }
+
+    const AREA: Rect = Rect::new(10, 104, 460, 158);
+
+    fn placement(avoid: Rect) -> Placement {
+        Placement {
+            area: AREA,
+            avoid,
+            pad: 24,
+            tries: 64,
+        }
+    }
+
+    fn inside(area: Rect, r: Rect) -> bool {
+        r.x >= area.x
+            && r.y >= area.y
+            && r.x + r.w <= area.x + area.w
+            && r.y + r.h <= area.y + area.h
+    }
+
+    #[test]
+    fn spots_stay_inside_the_area_and_clear_of_the_avoided_rect() {
+        let mut rng = Lcg(1234);
+        let mut old = Rect::new(300, 110, 96, 44);
+        for round in 0..2000u32 {
+            let avoid = if round % 2 == 0 {
+                Rect::new(60, 176, 150, 56)
+            } else {
+                Rect::new(38, 168, 195, 72)
+            };
+            let next = farthest_free_spot(old, &placement(avoid), &mut || rng.next());
+            assert!(inside(AREA, next), "{next:?} left the area");
+            assert!(!next.overlaps(&avoid, 24), "{next:?} touches {avoid:?}");
+            old = next;
+        }
+    }
+
+    #[test]
+    fn every_move_is_visible_and_usually_a_big_one() {
+        let avoid = Rect::new(60, 176, 150, 56);
+        let mut rng = Lcg(99);
+        let mut old = Rect::new(300, 110, 96, 44);
+        let mut total: i64 = 0;
+        let rounds = 2000;
+        for _ in 0..rounds {
+            let next = farthest_free_spot(old, &placement(avoid), &mut || rng.next());
+            let (dx, dy) = (i32::from(next.x - old.x), i32::from(next.y - old.y));
+            let d2 = dx * dx + dy * dy;
+            assert!(d2 > 60 * 60, "moved only {} px", (d2 as f32).sqrt());
+            total += i64::from(d2);
+            old = next;
+        }
+        assert!(
+            total / i64::from(rounds) > 130 * 130,
+            "average move too small"
+        );
+    }
+
+    #[test]
+    fn works_when_the_old_spot_is_cramped() {
+        let avoid = Rect::new(38, 168, 195, 72);
+        let mut rng = Lcg(5);
+        let old = Rect::new(274, 109, 96, 44);
+        for _ in 0..500 {
+            let next = farthest_free_spot(old, &placement(avoid), &mut || rng.next());
+            assert!(!next.overlaps(&avoid, 24));
+        }
+    }
+
+    #[test]
+    fn falls_back_to_the_far_side_when_nothing_is_free() {
+        let avoid = Rect::new(0, 0, 480, 272);
+        let old = Rect::new(300, 110, 96, 44);
+        let mut rng = Lcg(3);
+        let spot = farthest_free_spot(old, &placement(avoid), &mut || rng.next());
+        assert!(inside(AREA, spot), "{spot:?}");
+    }
+
+    #[test]
+    fn a_rectangle_as_big_as_the_area_cannot_move() {
+        let old = Rect::new(10, 104, 460, 158);
+        let mut rng = Lcg(8);
+        let spot = farthest_free_spot(old, &placement(Rect::new(0, 0, 1, 1)), &mut || rng.next());
+        assert_eq!(spot, old);
+    }
+}

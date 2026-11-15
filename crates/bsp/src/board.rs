@@ -150,7 +150,7 @@ fn take_framebuffer() -> &'static mut [u16; LCD_PIXELS] {
     unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER) }
 }
 
-/// LED object 
+/// LED object
 pub struct Leds {
     green: PC3<Output<PushPull>>,
     red: PC2<Output<PushPull>>,

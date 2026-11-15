@@ -1,17 +1,17 @@
-//! Bring-up firmware: the real proposal-box logic on the real LEDs, with the
-//! LCD painted the theme's background color. No drawing or touch yet.
-
 #![no_std]
 #![no_main]
 
-use app::state::NEXT_BUTTON;
-use app::story::Content;
-use app::{update, Effects, Event, Model, Point, Rect, Scene, Story, TouchEvent, XorShift32};
-use bsp::Board;
-use cortex_m_rt::entry;
 use defmt_rtt as _;
 use panic_probe as _;
 
+use app::state::NEXT_BUTTON;
+use app::story::Content;
+use app::{Model, Point, Rect, Scene, Story};
+use rtic_monotonics::systick::prelude::*;
+
+systick_monotonic!(Mono, 1_000);
+
+/// How often the logic gets a tick, in milliseconds.
 const TICK_MS: u32 = 16;
 
 fn center(r: Rect) -> Point {
@@ -50,52 +50,107 @@ fn log_scene(model: &Model) {
     }
 }
 
-#[entry]
-fn main() -> ! {
-    defmt::info!("h7dk-fw boot");
-    let mut board = Board::take().expect("board peripherals were already taken");
-    defmt::info!("core clock {} Hz", board.core_clock_hz);
+#[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
+mod firmware {
+    use app::story::Content;
+    use app::{update, Event, Model, TouchEvent, XorShift32};
+    use bsp::{Board, Button, Display, Leds};
+    use rtic_monotonics::systick::prelude::*;
 
-    board
-        .display
-        .framebuffer()
-        .fill(ui::theme::to_raw(ui::theme::BACKGROUND));
-    defmt::info!("lcd: painted the background color");
+    use super::{log_scene, next_tap, Mono, TICK_MS};
 
-    let story = Content;
-    let mut model = Model::new(0);
-    let mut rng = XorShift32::new(0xA5A5_1234);
-    let cycles_per_tick = board.core_clock_hz / 1000 * TICK_MS;
+    #[shared]
+    struct Shared {
+        model: Model,
+        leds: Leds,
+    }
 
-    let mut now_ms = 0u32;
-    let mut was_pressed = false;
-    log_scene(&model);
+    #[local]
+    struct Local {
+        button: Button,
+        display: Display,
+        rng: XorShift32,
+        was_pressed: bool,
+    }
 
-    loop {
-        now_ms = now_ms.wrapping_add(TICK_MS);
-        let mut fx: Effects = update(&mut model, &story, &mut rng, Event::Tick { now_ms });
+    #[init]
+    fn init(cx: init::Context) -> (Shared, Local) {
+        defmt::info!("h7dk-fw boot");
+        let Board {
+            leds,
+            button,
+            display,
+            core_clock_hz,
+        } = Board::init(cx.device);
+        defmt::info!("core clock {} Hz", core_clock_hz);
 
-        let pressed = board.button.is_pressed();
-        if pressed && !was_pressed {
-            let tap = next_tap(&model, &story);
-            defmt::info!("button -> tap at ({}, {})", tap.x, tap.y);
-            fx = update(
-                &mut model,
-                &story,
-                &mut rng,
-                Event::Touch(TouchEvent::Down(tap)),
-            );
+        Mono::start(cx.core.SYST, core_clock_hz);
+
+        let model = Model::new(0);
+        log_scene(&model);
+
+        tick::spawn().ok();
+        render::spawn().ok();
+
+        (
+            Shared { model, leds },
+            Local {
+                button,
+                display,
+
+                rng: XorShift32::new(0xA5A5_1234),
+                was_pressed: false,
+            },
+        )
+    }
+
+    #[task(shared = [model, leds], local = [button, rng, was_pressed])]
+    async fn tick(mut cx: tick::Context) {
+        let story = Content;
+        let mut next = Mono::now();
+        loop {
+            next += TICK_MS.millis();
+            Mono::delay_until(next).await;
+            let now_ms = Mono::now().duration_since_epoch().to_millis();
+
+            let pressed = cx.local.button.is_pressed();
+            let tapped = pressed && !*cx.local.was_pressed;
+            *cx.local.was_pressed = pressed;
+
+            let fx = cx.shared.model.lock(|model| {
+                let mut fx = update(model, &story, cx.local.rng, Event::Tick { now_ms });
+                if tapped {
+                    let tap = next_tap(model, &story);
+                    defmt::info!("button -> tap at ({}, {})", tap.x, tap.y);
+                    fx = update(
+                        model,
+                        &story,
+                        cx.local.rng,
+                        Event::Touch(TouchEvent::Down(tap)),
+                    );
+                }
+                if fx.scene_changed || fx.reveal.is_some() {
+                    log_scene(model);
+                }
+                fx
+            });
+
+            if fx.chapter_complete {
+                defmt::info!("chapter complete");
+            }
+            cx.shared.leds.lock(|leds| leds.set(fx.leds.0, fx.leds.1));
+            if fx.redraw {
+                let _ = render::spawn();
+            }
         }
-        was_pressed = pressed;
+    }
 
-        if fx.scene_changed || fx.reveal.is_some() {
-            log_scene(&model);
-        }
-        if fx.chapter_complete {
-            defmt::info!("chapter complete");
-        }
-
-        board.leds.set(fx.leds.0, fx.leds.1);
-        cortex_m::asm::delay(cycles_per_tick);
+    #[task(local = [display])]
+    async fn render(cx: render::Context) {
+        cx.local
+            .display
+            .framebuffer()
+            .fill(ui::theme::to_raw(ui::theme::BACKGROUND));
+        defmt::info!("lcd: painted the background color");
     }
 }

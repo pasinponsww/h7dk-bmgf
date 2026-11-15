@@ -133,3 +133,148 @@ fn celebrate(m: &mut Model, fx: &mut Effects) {
     fx.scene_changed = true;
     fx.redraw = true;
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::common::testing::{story_state, Rig, CH0};
+    use crate::state::{Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES};
+    use geometry::Point;
+
+    #[test]
+    fn any_touch_on_the_intro_opens_the_story() {
+        let mut r = Rig::new();
+        let fx = r.tap(240, 136);
+        assert_eq!(story_state(&r.m), (0, 0, None));
+        assert!(fx.scene_changed && fx.redraw);
+        assert_eq!(fx.ripple, Some(Point::new(240, 136)));
+    }
+
+    #[test]
+    fn tapping_objects_reveals_lines_and_flashes_both_leds() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let fx = r.tap_rect(CH0[1]);
+        assert_eq!(fx.reveal, Some(1));
+        assert_eq!(story_state(&r.m), (0, 0b10, Some(1)));
+        assert_eq!(fx.leds, (true, true), "both LEDs flash on a hit");
+        let later = r.tick(FLASH_MS + 1);
+        assert!(!(later.leds.0 && later.leds.1), "the flash ends");
+    }
+
+    #[test]
+    fn a_miss_only_makes_a_ripple() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let fx = r.tap(10, 200);
+        assert_eq!(fx.ripple, Some(Point::new(10, 200)));
+        assert_eq!(fx.reveal, None);
+        assert!(!fx.redraw);
+        assert_eq!(story_state(&r.m), (0, 0, None));
+    }
+
+    #[test]
+    fn next_is_locked_until_every_object_is_found() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let fx = r.tap_next();
+        assert_eq!(
+            fx.nudge,
+            Some(0),
+            "locked Next points at the first unfound object"
+        );
+        assert_eq!(story_state(&r.m).0, 0);
+
+        r.tap_rect(CH0[0]);
+        assert_eq!(r.tap_next().nudge, Some(1));
+        r.tap_rect(CH0[1]);
+        let fx = r.tap_next();
+        assert!(fx.scene_changed);
+        assert_eq!(story_state(&r.m), (1, 0, None));
+    }
+
+    #[test]
+    fn chapter_complete_fires_exactly_once() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        assert!(!r.tap_rect(CH0[0]).chapter_complete);
+        assert!(r.tap_rect(CH0[1]).chapter_complete);
+        assert!(
+            !r.tap_rect(CH0[1]).chapter_complete,
+            "re-tapping does not repeat it"
+        );
+    }
+
+    #[test]
+    fn finishing_the_last_chapter_leads_to_the_question() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        assert_eq!(r.m.no_rect, INITIAL_NO);
+        assert_eq!(r.m.dodges, 0);
+    }
+
+    #[test]
+    fn touching_near_no_makes_it_jump_clear_of_yes() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let before = r.m.no_rect;
+        let fx = r.tap_rect(before);
+        assert!(fx.dodged && fx.redraw);
+        assert_eq!(r.m.dodges, 1);
+        assert_ne!(r.m.no_rect, before);
+        assert!(!r.m.no_rect.overlaps(&r.m.yes_rect(), 24));
+        assert!(r.m.no_rect.x >= 10 && r.m.no_rect.x + r.m.no_rect.w <= 470);
+    }
+
+    #[test]
+    fn a_touch_far_from_no_does_nothing() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let fx = r.tap(20, 20);
+        assert!(!fx.dodged && !fx.scene_changed);
+        assert_eq!(r.m.dodges, 0);
+    }
+
+    #[test]
+    fn no_gives_up_after_five_dodges_and_becomes_okay_yes() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        for _ in 0..MAX_DODGES {
+            assert!(!r.m.no_gave_up());
+            let target = r.m.no_rect;
+            assert!(r.tap_rect(target).dodged);
+        }
+        assert!(r.m.no_gave_up());
+        assert_eq!(r.m.no_rect.w, GIVE_UP_W);
+        assert!(
+            r.m.no_rect.x + r.m.no_rect.w <= 470,
+            "stays on screen after widening"
+        );
+
+        let still = r.m.no_rect;
+        let fx = r.tap_rect(still);
+        assert!(!fx.dodged);
+        assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    #[test]
+    fn yes_always_works_even_after_dodges() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let target = r.m.no_rect;
+        r.tap_rect(target);
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    #[test]
+    fn a_touch_on_the_celebration_does_nothing() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let fx = r.tap(100, 100);
+        assert!(!fx.redraw && !fx.scene_changed);
+        assert_eq!(r.m.scene, Scene::Celebration);
+    }
+}
