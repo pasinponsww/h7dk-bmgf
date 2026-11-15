@@ -34,7 +34,7 @@ pub fn ensure_elf(release: bool) -> Result<PathBuf> {
     if elf.is_file() {
         Ok(elf)
     } else {
-        Err("no firmware build found. Run: cargo proj build".to_string())
+        Err("no firmware build found. Run: cargo proj mbedded build".to_string())
     }
 }
 

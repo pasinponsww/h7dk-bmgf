@@ -38,7 +38,7 @@ fn git(args: &[&str]) -> Option<String> {
     capture(c).ok()
 }
 
-/// `cargo proj status`: prints the state of the tools, the board, the build
+/// `cargo proj common status`: prints the state of the tools, the board, the build
 /// outputs and the project.
 pub fn status() -> Result<()> {
     let mut next: Vec<String> = Vec::new();
@@ -64,7 +64,7 @@ pub fn status() -> Result<()> {
             &format!("target {ARM_TARGET}"),
             "needed for the firmware",
         );
-        next.push("Run: cargo proj setup".into());
+        next.push("Run: cargo proj common setup".into());
     }
     let mut c = tool("probe-rs");
     c.arg("--version");
@@ -72,7 +72,7 @@ pub fn status() -> Result<()> {
         Ok(v) => row(Mark::Ok, "probe-rs", &first_line(&v)),
         Err(_) => {
             row(Mark::Missing, "probe-rs", "flash and debug need it");
-            next.push("Run: cargo proj setup".into());
+            next.push("Run: cargo proj common setup".into());
         }
     }
     if installed_components().contains("llvm-tools") {
@@ -91,7 +91,7 @@ pub fn status() -> Result<()> {
         Ok(None) => {
             row(Mark::Missing, "debug probe", "no board detected");
             next.push(
-                "Plug the ST-LINK USB port into the PC, try another cable, then run: cargo proj status"
+                "Plug the ST-LINK USB port into the PC, try another cable, then run: cargo proj common status"
                     .into(),
             );
         }
@@ -109,7 +109,7 @@ pub fn status() -> Result<()> {
         );
     } else {
         row(Mark::Optional, "firmware (release)", "not built yet");
-        next.push("Build it: cargo proj build".into());
+        next.push("Build it: cargo proj mbedded build".into());
     }
 
     header("Project");
@@ -140,12 +140,12 @@ pub fn status() -> Result<()> {
     println!("\nNext:");
     next.dedup();
     if next.is_empty() {
-        println!("  Everything is ready. Try: cargo proj flash");
+        println!("  Everything is ready. Try: cargo proj mbedded flash");
     } else {
         for n in &next {
             println!("  - {n}");
         }
-        println!("  - Tests need no board: cargo proj test");
+        println!("  - Tests need no board: cargo proj common test");
     }
     Ok(())
 }
@@ -188,7 +188,7 @@ pub fn find_missing() -> Vec<Missing> {
     m
 }
 
-/// `cargo proj setup`: lists what is missing and installs it after asking
+/// `cargo proj common setup`: lists what is missing and installs it after asking
 /// (or straight away with `yes`).
 pub fn setup(yes: bool) -> Result<()> {
     let missing = find_missing();
@@ -212,6 +212,6 @@ pub fn setup(yes: bool) -> Result<()> {
         c.args(m.args);
         exec(c)?;
     }
-    println!("\nDone. Check with: cargo proj status");
+    println!("\nDone. Check with: cargo proj common status");
     Ok(())
 }

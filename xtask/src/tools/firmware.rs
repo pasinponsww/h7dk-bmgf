@@ -12,7 +12,7 @@ use super::process::{capture, tool, Result};
 pub const NO_BOARD: &str = "no board found: probe-rs sees no debug probe.\n  \
     - Plug the board's ST-LINK USB port into the PC (the port labelled ST-LINK, not the user USB).\n  \
     - Try another USB cable, since some cables only charge.\n  \
-    - Check again with: cargo proj status";
+    - Check again with: cargo proj common status";
 
 /// Picks the first probe out of `probe-rs list` output. `None` when there is none.
 pub fn parse_probe_list(out: &str) -> Option<String> {
@@ -35,7 +35,7 @@ pub fn probe_rs_installed() -> bool {
 /// The connected probe, if any.
 pub fn probe() -> Result<Option<String>> {
     if !probe_rs_installed() {
-        return Err("probe-rs is not installed. Run: cargo proj setup".to_string());
+        return Err("probe-rs is not installed. Run: cargo proj common setup".to_string());
     }
     let mut c = tool("probe-rs");
     c.arg("list");
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn the_no_board_message_tells_the_user_what_to_do() {
         assert!(NO_BOARD.contains("ST-LINK"));
-        assert!(NO_BOARD.contains("cargo proj status"));
+        assert!(NO_BOARD.contains("cargo proj common status"));
     }
 
     #[test]

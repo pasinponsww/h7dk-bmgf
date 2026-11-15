@@ -113,7 +113,7 @@ pub fn require_target(target: &str) -> Result<()> {
         Ok(())
     } else {
         Err(format!(
-            "the Rust target {target} is not installed. Run: cargo proj setup"
+            "the Rust target {target} is not installed. Run: cargo proj common setup"
         ))
     }
 }

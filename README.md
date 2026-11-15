@@ -7,7 +7,7 @@ A proposal story for the STM32H735G-DK touchscreen, written in embedded Rust.
 Install Rust and the Visual Studio **Desktop development with C++** workload. Then open a new terminal and run:
 
 ```powershell
-cargo proj setup
+cargo proj common setup
 ```
 
 This installs any missing tools and Rust targets.
@@ -17,27 +17,29 @@ This installs any missing tools and Rust targets.
 Use `cargo proj` to run project commands. (`cargo xtask` works too.)
 
 ```powershell
-cargo proj status          # Check tools, board, and build files
-cargo proj setup           # Install missing tools
-cargo proj test            # Run logic tests on your PC
-cargo proj check           # Run formatting, lint, tests, and builds
-cargo proj fmt             # Format the code
+cargo proj common status   # Check tools, board, and build files
+cargo proj common setup    # Install missing tools
+cargo proj common test     # Run logic tests on your PC
+cargo proj common check    # Run formatting, lint, tests, and the firmware build
+cargo proj common fmt      # Format the code
 
-cargo proj build           # Build the firmware
-cargo proj size            # Show flash and RAM usage
-cargo proj flash           # Build and flash the board
-cargo proj run             # Flash the board and show its log
-cargo proj attach          # Show the board log
-cargo proj reset           # Reset the board
-cargo proj clean           # Delete build files, then rebuild the helper itself
+cargo proj mbedded build   # Build the firmware and print flash and RAM use
+cargo proj mbedded build --flash   # Build, flash and reset in one step
+cargo proj mbedded flash   # Build and flash the board
+cargo proj mbedded run     # Flash the board and show its log
+cargo proj mbedded attach  # Show the board log
+cargo proj mbedded reset   # Reset the board
+cargo proj mbedded detect  # Show the connected board
 ```
 
 Add `--help` to any command for more information.
 
+Short names: under `common`, `s` status, `t` test and `ci` check. Under `mbedded`, `b` or `compile` build, `f` flash and `r` run.
+
 Use `--story <folder>` to choose a story:
 
 ```powershell
-cargo proj build --story personal
+cargo proj mbedded build --story personal
 ```
 
 The default story is `default`. To run `proj` without typing `cargo`, install it once:
