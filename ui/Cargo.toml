@@ -1,0 +1,11 @@
+[package]
+name = "ui"
+version.workspace = true
+edition.workspace = true
+description = "Colors and drawing for the LCD, generic over any embedded-graphics target."
+
+[dependencies]
+embedded-graphics = { version = "0.8", default-features = false }
+
+[lints]
+workspace = true

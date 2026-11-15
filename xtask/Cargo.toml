@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+description = "Project helper: `cargo proj <command>` (build, flash, attach, status, sim ...)."
+publish = false
+
+[[bin]]
+name = "proj"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true
