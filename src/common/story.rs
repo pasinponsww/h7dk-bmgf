@@ -32,6 +32,10 @@ pub struct Hotspot {
     pub icon: &'static str,
     /// The line revealed when it is tapped.
     pub line: &'static str,
+    /// The same moment in Chinese, or empty.
+    pub zh: &'static str,
+    /// Pinyin for `zh`, or empty.
+    pub pinyin: &'static str,
 }
 
 /// One chapter of the story.
@@ -39,6 +43,8 @@ pub struct Hotspot {
 pub struct Chapter {
     /// Big title at the top of the page.
     pub title: &'static str,
+    /// Name of the mascot mood on this page, or empty for the default.
+    pub mood: &'static str,
     /// Its tappable objects.
     pub hotspots: &'static [Hotspot],
 }
@@ -56,12 +62,47 @@ const fn slot(count: usize, index: usize) -> (i16, i16) {
     }
 }
 
-const fn hs(count: usize, index: usize, icon: &'static str, line: &'static str) -> Hotspot {
+/// A sentence, with an optional Chinese version and its pinyin (both empty if absent).
+#[derive(Copy, Clone, Debug)]
+pub struct Phrase {
+    /// English text.
+    pub en: &'static str,
+    /// Chinese text, or empty.
+    pub zh: &'static str,
+    /// Pinyin for `zh`, or empty.
+    pub pinyin: &'static str,
+}
+
+/// The question screen and the celebration after it.
+#[derive(Copy, Clone, Debug)]
+pub struct Ending {
+    /// The question that is asked.
+    pub question: Phrase,
+    /// Text on the YES button.
+    pub yes: &'static str,
+    /// Text on the NO button after 0, 1, 2... jumps; the last one is shown once it gives up.
+    pub no_labels: [&'static str; 6],
+    /// Big title of the celebration.
+    pub title: &'static str,
+    /// The final message under the title.
+    pub message: Phrase,
+}
+
+const fn hs(
+    count: usize,
+    index: usize,
+    icon: &'static str,
+    line: &'static str,
+    zh: &'static str,
+    pinyin: &'static str,
+) -> Hotspot {
     let (x, y) = slot(count, index);
     Hotspot {
         rect: Rect::new(x, y, OBJECT_SIZE, OBJECT_SIZE),
         icon,
         line,
+        zh,
+        pinyin,
     }
 }
 
@@ -88,7 +129,7 @@ impl Story for Content {
 
 #[cfg(test)]
 mod tests {
-    use super::{full_mask, Content, Story, CHAPTERS};
+    use super::{full_mask, Content, Story, CHAPTERS, ENDING};
     use crate::state::{NEXT_BUTTON, SCREEN_H, SCREEN_W};
     use crate::{update, Event, Model, Point, Scene, TouchEvent, XorShift32};
 
@@ -150,6 +191,43 @@ mod tests {
                 assert!(h.line.chars().count() <= 160, "{}: line too long", c.title);
                 assert!(!h.icon.is_empty());
             }
+        }
+    }
+
+    #[test]
+    fn chinese_comes_with_pinyin_and_never_alone() {
+        for c in &CHAPTERS {
+            for h in c.hotspots {
+                assert_eq!(h.zh.is_empty(), h.pinyin.is_empty(), "{}", c.title);
+            }
+        }
+        let q = ENDING.question;
+        assert_eq!(q.zh.is_empty(), q.pinyin.is_empty());
+        let m = ENDING.message;
+        assert_eq!(m.zh.is_empty(), m.pinyin.is_empty());
+    }
+
+    #[test]
+    fn ending_texts_are_filled_in_and_fit_the_buttons() {
+        assert!(!ENDING.question.en.trim().is_empty());
+        assert!(!ENDING.title.trim().is_empty());
+        assert!(!ENDING.message.en.trim().is_empty());
+        assert!((1..=8).contains(&ENDING.yes.chars().count()));
+        for label in ENDING.no_labels {
+            assert!((1..=14).contains(&label.chars().count()), "{label}");
+        }
+    }
+
+    #[test]
+    fn every_chapter_mood_is_a_known_mascot_mood() {
+        for c in &CHAPTERS {
+            assert!(
+                c.mood.is_empty() || ui::mascot::Mood::from_name(c.mood).is_some(),
+                "{}: unknown mood \"{}\", use one of {:?}",
+                c.title,
+                c.mood,
+                ui::mascot::Mood::NAMES
+            );
         }
     }
 

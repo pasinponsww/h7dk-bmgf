@@ -40,6 +40,9 @@ panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 rtic = { version = "2", features = ["thumbv7-backend"], optional = true }
 rtic-monotonics = { version = "2", features = ["cortex-m-systick"], optional = true }
 
+[dev-dependencies]
+ui = { path = "ui" }
+
 [build-dependencies]
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 

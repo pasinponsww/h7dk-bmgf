@@ -1,5 +1,6 @@
 [[chapter]]
 title = "The beginning"
+mood = "wow"
 
 [[chapter.object]]
 icon = "door"
@@ -15,6 +16,7 @@ line = "Tap an object to read its line. Find them all to go on."
 
 [[chapter]]
 title = "Something together"
+mood = "happy"
 
 [[chapter.object]]
 icon = "calendar-heart"
@@ -26,6 +28,7 @@ line = "Add another one here."
 
 [[chapter]]
 title = "Now"
+mood = "love"
 
 [[chapter.object]]
 icon = "star"
@@ -34,3 +37,12 @@ line = "Say what you like about them."
 [[chapter.object]]
 icon = "heart"
 line = "End on something kind."
+
+[question]
+text = "Will you be my girlfriend?"
+yes = "YES"
+no_labels = ["No", "Wait, no", "Sure?", "Error 404", "Really?", "Okay, yes"]
+
+[celebration]
+title = "You said yes"
+message = "best day ever"
