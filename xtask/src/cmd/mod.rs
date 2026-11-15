@@ -2,17 +2,13 @@
 //!
 //! - `board`: build, size, flash, run, attach, reset
 //! - `quality`: test, check, fmt, clean
-//! - `preview`: sim, plan
 //! - `health`: status, setup
-//! - `story`: story check, story list
 
 pub mod board;
 pub mod health;
-pub mod preview;
 pub mod quality;
-pub mod story;
 
-use crate::cli::{Cli, Cmd, StoryCmd};
+use crate::cli::{Cli, Cmd};
 use crate::tools::process::Result;
 
 /// Runs the command the user asked for.
@@ -32,16 +28,6 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Cmd::Run { dev } => board::run(!dev),
         Cmd::Attach { dev } => board::attach(!dev),
         Cmd::Reset => board::reset(),
-        Cmd::Sim {
-            port,
-            no_open,
-            no_build,
-        } => preview::sim(port, !no_open, !no_build),
-        Cmd::Plan { port, no_open } => preview::plan(port, !no_open),
-        Cmd::Story { cmd } => match cmd {
-            StoryCmd::Check { name } => story::check(name.as_deref().unwrap_or(&cli.story)),
-            StoryCmd::List => story::list(),
-        },
         Cmd::Clean => quality::clean(),
     }
 }

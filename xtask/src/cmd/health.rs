@@ -3,7 +3,7 @@
 
 use crate::tools::console::{age, confirm, header, kb};
 use crate::tools::firmware::{probe, probe_rs_installed};
-use crate::tools::paths::{elf_path, root, story_names, web_dir, ARM_TARGET, WASM_TARGET};
+use crate::tools::paths::{elf_path, root, ARM_TARGET};
 use crate::tools::process::{
     capture, cargo, installed_components, installed_targets, run as exec, tool, Result,
 };
@@ -56,17 +56,15 @@ pub fn status() -> Result<()> {
         }
     }
     let targets = installed_targets();
-    for (t, why) in [(ARM_TARGET, "firmware"), (WASM_TARGET, "simulator")] {
-        if targets.iter().any(|x| x == t) {
-            row(Mark::Ok, &format!("target {t}"), why);
-        } else {
-            row(
-                Mark::Missing,
-                &format!("target {t}"),
-                &format!("needed for the {why}"),
-            );
-            next.push("Run: cargo proj setup".into());
-        }
+    if targets.iter().any(|x| x == ARM_TARGET) {
+        row(Mark::Ok, &format!("target {ARM_TARGET}"), "firmware");
+    } else {
+        row(
+            Mark::Missing,
+            &format!("target {ARM_TARGET}"),
+            "needed for the firmware",
+        );
+        next.push("Run: cargo proj setup".into());
     }
     let mut c = tool("probe-rs");
     c.arg("--version");
@@ -113,25 +111,10 @@ pub fn status() -> Result<()> {
         row(Mark::Optional, "firmware (release)", "not built yet");
         next.push("Build it: cargo proj build".into());
     }
-    let wasm = web_dir().join("sim.wasm");
-    if wasm.is_file() {
-        row(
-            Mark::Ok,
-            "simulator",
-            &format!("built {}", age(&wasm).unwrap_or_default()),
-        );
-    } else {
-        row(Mark::Optional, "simulator", "not built yet");
-        next.push("See it in the browser: cargo proj sim".into());
-    }
 
     header("Project");
     let active = std::env::var("H7_STORY").unwrap_or_else(|_| "default".to_string());
-    row(
-        Mark::Ok,
-        "story",
-        &format!("using \"{active}\", folders: {}", story_names().join(", ")),
-    );
+    row(Mark::Ok, "story", &format!("using \"{active}\""));
     match git(&["status", "--short"]) {
         Some(s) => {
             let changed = s.lines().count();
@@ -157,12 +140,12 @@ pub fn status() -> Result<()> {
     println!("\nNext:");
     next.dedup();
     if next.is_empty() {
-        println!("  Everything is ready. Try: cargo proj flash   (or cargo proj sim)");
+        println!("  Everything is ready. Try: cargo proj flash");
     } else {
         for n in &next {
             println!("  - {n}");
         }
-        println!("  - Tests and the simulator need no board: cargo proj test, cargo proj sim");
+        println!("  - Tests need no board: cargo proj test");
     }
     Ok(())
 }
@@ -186,13 +169,6 @@ pub fn find_missing() -> Vec<Missing> {
             what: "Rust target for the chip",
             program: "rustup",
             args: &["target", "add", ARM_TARGET],
-        });
-    }
-    if !targets.iter().any(|t| t == WASM_TARGET) {
-        m.push(Missing {
-            what: "Rust target for the simulator",
-            program: "rustup",
-            args: &["target", "add", WASM_TARGET],
         });
     }
     if !installed_components().contains("llvm-tools") {

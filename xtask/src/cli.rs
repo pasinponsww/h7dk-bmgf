@@ -32,7 +32,7 @@ pub enum Cmd {
     },
     /// Run all the logic tests on the PC (no board needed)
     Test,
-    /// Run every quality gate: format, lint, tests, firmware and simulator builds
+    /// Run every quality gate: format, lint, tests and the firmware build
     Check,
     /// Format the code
     Fmt,
@@ -71,44 +71,6 @@ pub enum Cmd {
     },
     /// Reset the board
     Reset,
-    /// Build the browser simulator and open it on localhost
-    Sim {
-        /// Port to serve on
-        #[arg(long, default_value_t = 8766)]
-        port: u16,
-        /// Do not open the browser
-        #[arg(long)]
-        no_open: bool,
-        /// Serve the last build without rebuilding
-        #[arg(long)]
-        no_build: bool,
-    },
-    /// Open the local planning page (docs/plan) on localhost
-    Plan {
-        /// Port to serve on
-        #[arg(long, default_value_t = 8765)]
-        port: u16,
-        /// Do not open the browser
-        #[arg(long)]
-        no_open: bool,
-    },
-    /// Work with the story folders
-    Story {
-        #[command(subcommand)]
-        cmd: StoryCmd,
-    },
-    /// Delete all build output
+    /// Delete all build output, then rebuild this helper so `cargo proj` keeps working
     Clean,
-}
-
-/// What `cargo proj story` can do.
-#[derive(Subcommand)]
-pub enum StoryCmd {
-    /// Check that a story is valid: counts, line lengths, icons, and a full playthrough
-    Check {
-        /// The story folder to check (default: the --story value)
-        name: Option<String>,
-    },
-    /// List the story folders and say which are kept private
-    List,
 }

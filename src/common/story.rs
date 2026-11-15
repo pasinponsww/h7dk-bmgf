@@ -102,7 +102,7 @@ mod tests {
     }
 
     // Checks that hold for any story, so they also guard a personal one:
-    // run them with `cargo proj story check <name>`.
+    // run them with `cargo proj test --story <name>`.
     #[test]
     fn there_is_at_least_one_chapter() {
         assert!(!CHAPTERS.is_empty());

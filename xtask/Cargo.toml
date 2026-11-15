@@ -2,7 +2,7 @@
 name = "xtask"
 version.workspace = true
 edition.workspace = true
-description = "Project helper: `cargo proj <command>` (build, flash, attach, status, sim ...)."
+description = "Project helper: `cargo proj <command>` (build, flash, attach, status ...)."
 publish = false
 
 [[bin]]

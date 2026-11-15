@@ -1,6 +1,5 @@
 target/
 /docs/plan/
-/sim/web/sim.wasm
-/sim/web/icons/
-/sim/web/fonts/
+/sim/
+/.personal/
 /story/personal/

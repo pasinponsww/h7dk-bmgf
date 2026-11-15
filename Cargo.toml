@@ -50,7 +50,6 @@ workspace = true
 resolver = "2"
 members = [
     "ui",
-    "sim",
     "xtask",
     "crates/geometry",
     "crates/rng",
@@ -59,7 +58,6 @@ members = [
 default-members = [
     ".",
     "ui",
-    "sim",
     "xtask",
     "crates/geometry",
     "crates/rng",

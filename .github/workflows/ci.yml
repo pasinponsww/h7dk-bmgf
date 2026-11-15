@@ -85,37 +85,3 @@ jobs:
           name: h7dk-fw
           path: target/thumbv7em-none-eabihf/release/h7dk-fw
           if-no-files-found: error
-
-  simulator:
-    name: Build simulator
-    needs: check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: thumbv7em-none-eabihf,wasm32-unknown-unknown
-          components: clippy, rustfmt, rust-src, llvm-tools
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build
-        env:
-          CARGO_PROFILE_RELEASE_DEBUG: "0"
-          CARGO_PROFILE_RELEASE_STRIP: symbols
-        run: cargo build -p sim --release --target wasm32-unknown-unknown
-
-      - name: Bundle the page
-        run: |
-          mkdir -p dist/sim/icons dist/sim/fonts
-          cp sim/web/index.html dist/sim/
-          cp target/wasm32-unknown-unknown/release/sim.wasm dist/sim/
-          cp assets/icons/phosphor/duotone/*.svg dist/sim/icons/
-          cp assets/fonts/pixel/*.ttf dist/sim/fonts/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: simulator
-          path: dist/sim
-          if-no-files-found: error

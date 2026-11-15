@@ -23,19 +23,13 @@ cargo proj test            # Run logic tests on your PC
 cargo proj check           # Run formatting, lint, tests, and builds
 cargo proj fmt             # Format the code
 
-cargo proj sim             # Build and open the browser simulator
-cargo proj plan            # Open the planning page
-
-cargo proj story list      # List available stories
-cargo proj story check     # Check a story for errors
-
 cargo proj build           # Build the firmware
 cargo proj size            # Show flash and RAM usage
 cargo proj flash           # Build and flash the board
 cargo proj run             # Flash the board and show its log
 cargo proj attach          # Show the board log
 cargo proj reset           # Reset the board
-cargo proj clean           # Delete build files
+cargo proj clean           # Delete build files, then rebuild the helper itself
 ```
 
 Add `--help` to any command for more information.
@@ -43,7 +37,7 @@ Add `--help` to any command for more information.
 Use `--story <folder>` to choose a story:
 
 ```powershell
-cargo proj sim --story personal
+cargo proj build --story personal
 ```
 
 The default story is `default`. To run `proj` without typing `cargo`, install it once:
@@ -70,12 +64,10 @@ See `story/README.md` for the story format and rules. The build reports errors i
 - `src/` — Story logic and firmware
 - `src/task/` — Code for touch, timing, and LEDs
 - `ui/` — Colors and, later, screen drawing
-- `sim/` — Browser simulator
 - `xtask/` — The `cargo proj` command-line helper
 - `crates/` — Reusable libraries for geometry, random numbers, and board support
 - `story/` — Story files
 - `assets/` — Icons and fonts
-- `docs/plan/` — Local planning page; not included in git
 
 Reusable code goes in `crates/`. Code that is specific to this project stays in the top-level folders. The story logic does not depend on the board.
 
