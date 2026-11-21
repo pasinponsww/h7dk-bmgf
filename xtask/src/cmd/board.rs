@@ -5,6 +5,12 @@ use crate::tools::firmware::{measure, print_sizes, require_probe};
 use crate::tools::paths::{elf_path, ensure_elf, ARM_TARGET, CHIP};
 use crate::tools::process::{cargo, require_target, run as exec, tool, Result};
 
+/// Holds the chip in reset while the probe connects. The running firmware
+/// keeps the CPU and its memory bus busy, which can make a plain connect time
+/// out; under reset nothing runs yet. Flashing and resetting reset the chip
+/// anyway, so this costs nothing there.
+const UNDER_RESET: &str = "--connect-under-reset";
+
 /// `cargo proj mbedded build`: builds the firmware and prints how much of the chip it uses.
 pub fn build(release: bool) -> Result<()> {
     require_target(ARM_TARGET)?;
@@ -46,7 +52,7 @@ pub fn flash(release: bool, no_build: bool) -> Result<()> {
     }
     let elf = ensure_elf(release)?;
     let mut c = tool("probe-rs");
-    c.args(["download", "--chip", CHIP]).arg(&elf);
+    c.args(["download", "--chip", CHIP, UNDER_RESET]).arg(&elf);
     exec(c)?;
     reset()?;
     println!("\nFlashed and reset. Watch the log with: cargo proj mbedded attach");
@@ -58,7 +64,8 @@ pub fn run(release: bool) -> Result<()> {
     println!("board: {}", require_probe()?);
     build(release)?;
     let mut c = tool("probe-rs");
-    c.args(["run", "--chip", CHIP]).arg(elf_path(release));
+    c.args(["run", "--chip", CHIP, UNDER_RESET])
+        .arg(elf_path(release));
     exec(c)
 }
 
@@ -75,6 +82,6 @@ pub fn attach(release: bool) -> Result<()> {
 pub fn reset() -> Result<()> {
     require_probe()?;
     let mut c = tool("probe-rs");
-    c.args(["reset", "--chip", CHIP]);
+    c.args(["reset", "--chip", CHIP, UNDER_RESET]);
     exec(c)
 }

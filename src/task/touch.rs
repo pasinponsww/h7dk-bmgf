@@ -7,7 +7,7 @@ use rng::Rng;
 use crate::event::Effects;
 use crate::state::{
     Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON, NO_AREA,
-    SCREEN_W, YES_PAD,
+    RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 
@@ -39,8 +39,19 @@ pub(crate) fn on_down<S: Story, R: Rng>(
         }
         Scene::Story { chapter, found, .. } => story_touch(m, story, chapter, found, p, fx),
         Scene::Question => question_touch(m, rng, p, fx),
-        Scene::Celebration => {}
+        Scene::Celebration => {
+            if RESTART_BUTTON.contains(p) {
+                restart(m, fx);
+            }
+        }
     }
+}
+
+/// Back to the intro, as if the board had just started.
+pub(crate) fn restart(m: &mut Model, fx: &mut Effects) {
+    m.go(Scene::Intro);
+    fx.scene_changed = true;
+    fx.redraw = true;
 }
 
 fn story_touch<S: Story>(
@@ -136,8 +147,9 @@ fn celebrate(m: &mut Model, fx: &mut Effects) {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::testing::{story_state, Rig, CH0};
-    use crate::state::{Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES};
+    use crate::common::testing::{story_state, Fake, Rig, CH0};
+    use crate::state::{Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, RESTART_BUTTON};
+    use crate::{update, Event};
     use geometry::Point;
 
     #[test]
@@ -265,6 +277,38 @@ mod tests {
         let yes = r.m.yes_rect();
         r.tap_rect(yes);
         assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    #[test]
+    fn start_again_on_the_celebration_goes_back_to_the_intro() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let fx = r.tap_rect(RESTART_BUTTON);
+        assert_eq!(r.m.scene, Scene::Intro);
+        assert!(fx.scene_changed && fx.redraw);
+    }
+
+    #[test]
+    fn restart_goes_back_to_the_intro_from_anywhere() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        r.tap_rect(CH0[0]);
+        let fx = update(&mut r.m, &Fake, &mut r.rng, Event::Restart);
+        assert_eq!(r.m.scene, Scene::Intro);
+        assert!(fx.scene_changed);
+        r.play_to_question();
+        let target = r.m.no_rect;
+        r.tap_rect(target);
+        update(&mut r.m, &Fake, &mut r.rng, Event::Restart);
+        assert_eq!(r.m.scene, Scene::Intro);
+        r.play_to_question();
+        assert_eq!(
+            (r.m.dodges, r.m.no_rect),
+            (0, INITIAL_NO),
+            "NO starts over too"
+        );
     }
 
     #[test]

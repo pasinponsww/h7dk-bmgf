@@ -29,6 +29,8 @@ pub const GIVE_UP_W: i16 = 120;
 pub const IDLE_RESET_MS: u32 = 60_000;
 /// Where the "Next" button is on story pages.
 pub const NEXT_BUTTON: Rect = Rect::new(356, 214, 100, 40);
+/// The "Start again" button on the celebration screen.
+pub const RESTART_BUTTON: Rect = Rect::new(260, 206, 160, 48);
 /// Where the NO button starts on the question screen.
 pub const INITIAL_NO: Rect = Rect::new(300, 110, 96, 44);
 /// The part of the screen the NO button may jump around in. It stays below

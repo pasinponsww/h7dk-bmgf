@@ -4,7 +4,7 @@ proj = "run --quiet -p xtask --"
 xtask = "run --quiet -p xtask --"
 
 [target.thumbv7em-none-eabihf]
-runner = "probe-rs run --chip STM32H735IGKx"
+runner = "probe-rs run --chip STM32H735IGKx --connect-under-reset"
 rustflags = [
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",

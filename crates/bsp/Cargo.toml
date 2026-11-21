@@ -6,6 +6,7 @@ description = "Board Support Package"
 [dependencies]
 stm32h7xx-hal = { version = "0.16", features = ["stm32h735", "rt", "ltdc", "defmt"] }
 embedded-display-controller = "0.2"
+defmt = "0.3"
 
 [lints.rust]
 unsafe_code = "deny"

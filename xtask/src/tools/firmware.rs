@@ -47,45 +47,50 @@ pub fn require_probe() -> Result<String> {
     probe()?.ok_or_else(|| NO_BOARD.to_string())
 }
 
-/// Section sizes of the firmware, in bytes.
-#[derive(Debug, PartialEq, Eq)]
+/// How much of each memory the firmware uses, in bytes.
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Sizes {
-    /// Code and read-only data.
-    pub text: u64,
-    /// Initialised data.
-    pub data: u64,
-    /// Zero-initialised data.
-    pub bss: u64,
+    /// Flash: code, constants, and the start values of variables.
+    pub flash: u64,
+    /// DTCM (`RAM` in `memory.x`): variables. The stack gets the rest.
+    pub ram: u64,
+    /// AXI SRAM: what the LCD controller reads, the framebuffer.
+    pub axi: u64,
 }
 
-impl Sizes {
-    /// Bytes stored in flash.
-    pub fn flash(&self) -> u64 {
-        self.text + self.data
-    }
-    /// Bytes used in RAM at run time.
-    pub fn ram(&self) -> u64 {
-        self.data + self.bss
-    }
-}
-
-/// Reads the numbers from `llvm-size` output (text, data, bss ...).
+/// Reads the section table of `llvm-size -A` ("section size addr" rows).
 pub fn parse_size_output(out: &str) -> Option<Sizes> {
-    let line = out.lines().filter(|l| !l.trim().is_empty()).nth(1)?;
-    let mut n = line.split_whitespace().map(|v| v.parse::<u64>().ok());
-    Some(Sizes {
-        text: n.next()??,
-        data: n.next()??,
-        bss: n.next()??,
-    })
+    let mut sizes = Sizes::default();
+    let mut seen = false;
+    for line in out.lines() {
+        let mut cols = line.split_whitespace();
+        let (Some(name), Some(size)) = (cols.next(), cols.next()) else {
+            continue;
+        };
+        let Ok(size) = size.parse::<u64>() else {
+            continue;
+        };
+        match name {
+            ".vector_table" | ".text" | ".rodata" | ".gnu.sgstubs" => sizes.flash += size,
+            ".data" => {
+                sizes.flash += size;
+                sizes.ram += size;
+            }
+            ".bss" | ".uninit" => sizes.ram += size,
+            n if n.starts_with(".axisram") => sizes.axi += size,
+            _ => continue,
+        }
+        seen = true;
+    }
+    seen.then_some(sizes)
 }
 
 /// Reads "LENGTH = 1024K" for a region of `memory.x`.
 fn region_length(memory_x: &str, region: &str) -> Option<u64> {
-    let line = memory_x
-        .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with(region))?;
+    let line = memory_x.lines().map(str::trim).find(|l| {
+        l.strip_prefix(region)
+            .is_some_and(|rest| rest.trim_start().starts_with(':'))
+    })?;
     let value = line.split("LENGTH").nth(1)?.trim_start_matches([' ', '=']);
     let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
     let n: u64 = digits.parse().ok()?;
@@ -97,12 +102,24 @@ fn region_length(memory_x: &str, region: &str) -> Option<u64> {
     })
 }
 
-/// Flash and RAM size of the chip, read from `memory.x` so there is one source of truth.
-pub fn memory_limits(memory_x: &str) -> Option<(u64, u64)> {
-    Some((
-        region_length(memory_x, "FLASH")?,
-        region_length(memory_x, "RAM")?,
-    ))
+/// Size of each memory of the chip, read from `memory.x` so there is one source of truth.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// Flash.
+    pub flash: u64,
+    /// DTCM.
+    pub ram: u64,
+    /// AXI SRAM, or 0 when `memory.x` has no `AXISRAM` region.
+    pub axi: u64,
+}
+
+/// Reads the memory sizes from `memory.x`.
+pub fn memory_limits(memory_x: &str) -> Option<Limits> {
+    Some(Limits {
+        flash: region_length(memory_x, "FLASH")?,
+        ram: region_length(memory_x, "RAM")?,
+        axi: region_length(memory_x, "AXISRAM").unwrap_or(0),
+    })
 }
 
 fn llvm_size() -> Option<PathBuf> {
@@ -131,29 +148,37 @@ pub fn measure(release: bool) -> Result<Sizes> {
     let elf = ensure_elf(release)?;
     let program = llvm_size().ok_or("llvm-size not found")?;
     let mut c = Command::new(program);
-    c.arg(&elf);
+    c.arg("-A").arg(&elf);
     parse_size_output(&capture(c)?).ok_or_else(|| "could not read the size report".to_string())
 }
 
 /// Prints flash and RAM use as a share of the chip.
 pub fn print_sizes(s: &Sizes) {
     let memory_x = std::fs::read_to_string(root().join("memory.x")).unwrap_or_default();
-    let (flash_max, ram_max) = memory_limits(&memory_x).unwrap_or((1024 * 1024, 320 * 1024));
-    let pct = |used: u64, max: u64| used as f64 * 100.0 / max as f64;
-    println!(
-        "\n  flash  {:>10} of {} ({:.1}%)\n  ram    {:>10} of {} ({:.1}%)",
-        kb(s.flash()),
-        kb(flash_max),
-        pct(s.flash(), flash_max),
-        kb(s.ram()),
-        kb(ram_max),
-        pct(s.ram(), ram_max),
-    );
+    let max = memory_limits(&memory_x).unwrap_or(Limits {
+        flash: 1024 * 1024,
+        ram: 128 * 1024,
+        axi: 320 * 1024,
+    });
+    let row = |name: &str, used: u64, max: u64, what: &str| {
+        let pct = used as f64 * 100.0 / max.max(1) as f64;
+        println!(
+            "  {name:<8} {:>10} of {} ({pct:.1}%)  {what}",
+            kb(used),
+            kb(max)
+        );
+    };
+    println!();
+    row("flash", s.flash, max.flash, "code and text");
+    row("ram", s.ram, max.ram, "variables; the stack gets the rest");
+    if s.axi > 0 || max.axi > 0 {
+        row("lcd ram", s.axi, max.axi, "framebuffer");
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{memory_limits, parse_probe_list, parse_size_output, Sizes, NO_BOARD};
+    use super::{memory_limits, parse_probe_list, parse_size_output, Limits, Sizes, NO_BOARD};
     use crate::tools::paths::root;
 
     #[test]
@@ -179,43 +204,86 @@ mod tests {
 
     #[test]
     fn size_output_is_parsed() {
-        let out = "   text\t   data\t    bss\t    dec\t    hex\tfilename\n  12345\t    100\t   2000\t  14445\t   386d\tfile\n";
+        let out = "h7dk-fw  :
+section           size         addr
+.vector_table      716    134217728
+.text           33016    134218444
+.rodata         13764    134251460
+.data            3536    536870912
+.bss            15648    536874448
+.axisram       261120    603979776
+.uninit          1120    536890096
+.debug_info    412934            0
+Total          741854
+";
         let s = parse_size_output(out).unwrap();
         assert_eq!(
             s,
             Sizes {
-                text: 12345,
-                data: 100,
-                bss: 2000
+                flash: 716 + 33016 + 13764 + 3536,
+                ram: 3536 + 15648 + 1120,
+                axi: 261120,
             }
         );
-        assert_eq!(s.flash(), 12445);
-        assert_eq!(s.ram(), 2100);
     }
 
     #[test]
     fn garbage_size_output_is_refused() {
         assert!(parse_size_output("garbage").is_none());
         assert!(parse_size_output("").is_none());
-        assert!(parse_size_output("text data bss\nabc def ghi\n").is_none());
+        assert!(parse_size_output(
+            "section size addr
+.debug_info abc 0
+"
+        )
+        .is_none());
     }
 
     #[test]
     fn memory_limits_come_from_memory_x() {
-        let m = "MEMORY\n{\n  FLASH : ORIGIN = 0x08000000, LENGTH = 1024K\n  RAM   : ORIGIN = 0x24000000, LENGTH = 320K\n}\n";
-        assert_eq!(memory_limits(m), Some((1024 * 1024, 320 * 1024)));
+        let m = "MEMORY
+{
+  FLASH : ORIGIN = 0x08000000, LENGTH = 1024K
+  RAM   : ORIGIN = 0x20000000, LENGTH = 128K
+  AXISRAM : ORIGIN = 0x24000000, LENGTH = 320K
+}
+";
+        assert_eq!(
+            memory_limits(m),
+            Some(Limits {
+                flash: 1024 * 1024,
+                ram: 128 * 1024,
+                axi: 320 * 1024
+            })
+        );
         assert_eq!(memory_limits("nothing here"), None);
     }
 
     #[test]
-    fn megabyte_units_are_understood() {
-        let m = "FLASH : ORIGIN = 0, LENGTH = 2M\nRAM : ORIGIN = 0, LENGTH = 64K\n";
-        assert_eq!(memory_limits(m), Some((2 * 1024 * 1024, 64 * 1024)));
+    fn megabyte_units_are_understood_and_axisram_is_optional() {
+        let m = "FLASH : ORIGIN = 0, LENGTH = 2M
+RAM : ORIGIN = 0, LENGTH = 64K
+";
+        assert_eq!(
+            memory_limits(m),
+            Some(Limits {
+                flash: 2 * 1024 * 1024,
+                ram: 64 * 1024,
+                axi: 0
+            })
+        );
     }
 
     #[test]
     fn the_real_memory_x_parses_to_the_chip_sizes() {
         let text = std::fs::read_to_string(root().join("memory.x")).unwrap();
-        assert_eq!(memory_limits(&text), Some((1024 * 1024, 320 * 1024)));
+        assert_eq!(
+            memory_limits(&text),
+            Some(Limits {
+                flash: 1024 * 1024,
+                ram: 128 * 1024,
+                axi: 320 * 1024
+            })
+        );
     }
 }

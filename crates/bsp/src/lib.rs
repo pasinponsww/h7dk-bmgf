@@ -2,5 +2,7 @@
 
 pub mod board;
 
-pub use board::{Board, Button, Display, Leds, LCD_HEIGHT, LCD_PIXELS, LCD_WIDTH};
+pub use board::{
+    Board, Button, Display, Leds, Touch, TouchPoint, LCD_HEIGHT, LCD_PIXELS, LCD_WIDTH,
+};
 pub use stm32h7xx_hal as hal;

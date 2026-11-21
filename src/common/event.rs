@@ -12,6 +12,9 @@ pub enum Event {
     },
     /// A touch on the screen.
     Touch(TouchEvent),
+    /// Go back to the intro from wherever the story is (a long press on the
+    /// blue button).
+    Restart,
 }
 
 /// A touch reported by the touch controller.
