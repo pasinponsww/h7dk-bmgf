@@ -30,6 +30,12 @@ pub const MAUVE: Rgb565 = rgb(0xEA, 0xDB, 0xDD);
 pub const TEXT: Rgb565 = rgb(0x3B, 0x3F, 0x4A);
 /// Icon color, a deeper tone of the tile pink `#A9506B`.
 pub const ICON: Rgb565 = rgb(0xA9, 0x50, 0x6B);
+/// Quiet text: hints and buttons that do not work yet, `#8C858E`.
+pub const MUTED: Rgb565 = rgb(0x8C, 0x85, 0x8E);
+/// Text on an [`ICON`]-colored button: the background pink.
+pub const ON_ICON: Rgb565 = BACKGROUND;
+/// The floating hearts and the dog's collar, rose `#E0457A`.
+pub const HEART: Rgb565 = rgb(0xE0, 0x45, 0x7A);
 
 /// 8-bit RGB of a mascot sprite character, or `None` for a transparent cell.
 ///

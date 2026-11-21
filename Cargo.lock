@@ -61,6 +61,7 @@ dependencies = [
  "cortex-m-rt",
  "defmt 0.3.101",
  "defmt-rtt",
+ "embedded-graphics",
  "geometry",
  "panic-probe",
  "rng",

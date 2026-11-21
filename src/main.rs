@@ -15,6 +15,12 @@ systick_monotonic!(Mono, 1_000);
 const TICK_MS: u32 = 16;
 /// Holding the blue button this long goes back to the beginning.
 const LONG_PRESS_MS: u32 = 1_000;
+/// How often the screen is drawn again, in milliseconds (about 30 frames a second).
+const FRAME_MS: u32 = 33;
+/// Rows drawn at a time. Each finished band is copied into the framebuffer.
+const BAND_ROWS: usize = 16;
+/// Pixels in one band.
+const BAND_LEN: usize = bsp::LCD_WIDTH * BAND_ROWS;
 
 fn center(r: Rect) -> Point {
     Point::new(r.x + r.w / 2, r.y + r.h / 2)
@@ -52,23 +58,32 @@ fn log_scene(model: &Model) {
     }
 }
 
+fn now_ms() -> u32 {
+    Mono::now().duration_since_epoch().to_millis()
+}
+
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
+    use app::screen::{Cues, Painter};
     use app::story::Content;
-    use app::{update, Event, Model, Point, TouchEvent, XorShift32};
+    use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
     use bsp::{Board, Button, Display, Leds, Touch};
     use rtic_monotonics::systick::prelude::*;
+    use ui::frame::Band;
 
-    use super::{log_scene, next_tap, Mono, LONG_PRESS_MS, TICK_MS};
+    use super::{
+        log_scene, next_tap, now_ms, Mono, BAND_LEN, BAND_ROWS, FRAME_MS, LONG_PRESS_MS, TICK_MS,
+    };
 
     #[shared]
     struct Shared {
         model: Model,
-        leds: Leds,
+        cues: Cues,
     }
 
     #[local]
     struct Local {
+        leds: Leds,
         button: Button,
         touch: Touch,
         display: Display,
@@ -106,8 +121,12 @@ mod firmware {
         render::spawn().ok();
 
         (
-            Shared { model, leds },
+            Shared {
+                model,
+                cues: Cues::new(),
+            },
             Local {
+                leds,
                 button,
                 touch,
                 display,
@@ -120,14 +139,14 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(shared = [model, leds], local = [button, touch, rng, pressed_since, long_press_done, was_touching])]
+    #[task(priority = 2, shared = [model, cues], local = [leds, button, touch, rng, pressed_since, long_press_done, was_touching])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
         loop {
             next += TICK_MS.millis();
             Mono::delay_until(next).await;
-            let now_ms = Mono::now().duration_since_epoch().to_millis();
+            let now = now_ms();
 
             // A finger that just touched the glass is a tap.
             let finger = cx.local.touch.read();
@@ -141,11 +160,11 @@ mod firmware {
             let mut button_restart = false;
             match (pressed, *cx.local.pressed_since) {
                 (true, None) => {
-                    *cx.local.pressed_since = Some(now_ms);
+                    *cx.local.pressed_since = Some(now);
                     *cx.local.long_press_done = false;
                 }
                 (true, Some(down)) => {
-                    if !*cx.local.long_press_done && now_ms.wrapping_sub(down) >= LONG_PRESS_MS {
+                    if !*cx.local.long_press_done && now.wrapping_sub(down) >= LONG_PRESS_MS {
                         *cx.local.long_press_done = true;
                         button_restart = true;
                     }
@@ -158,49 +177,98 @@ mod firmware {
             }
 
             let rng = &mut *cx.local.rng;
-            let (fx, redraw) = cx.shared.model.lock(|model| {
+            let fx = cx.shared.model.lock(|model| {
                 let before = model.scene;
-                let mut fx = update(model, &story, rng, Event::Tick { now_ms });
-                let mut redraw = fx.redraw;
+                let mut fx = update(model, &story, rng, Event::Tick { now_ms: now });
+                let mut all = fx;
+                let mut tap = |model: &mut Model, at: Point, all: &mut Effects| {
+                    let f = update(model, &story, rng, Event::Touch(TouchEvent::Down(at)));
+                    merge(all, &f);
+                    f
+                };
                 if let (true, Some(t)) = (finger_down, finger) {
                     defmt::info!("touch: raw {} -> screen ({}, {})", t.raw, t.x, t.y);
-                    let at = Point::new(t.x, t.y);
-                    fx = update(model, &story, rng, Event::Touch(TouchEvent::Down(at)));
-                    redraw |= fx.redraw;
+                    fx = tap(model, Point::new(t.x, t.y), &mut all);
                 }
                 if button_tap {
                     let at = next_tap(model, &story);
                     defmt::info!("button -> tap at ({}, {})", at.x, at.y);
-                    fx = update(model, &story, rng, Event::Touch(TouchEvent::Down(at)));
-                    redraw |= fx.redraw;
+                    fx = tap(model, at, &mut all);
                 }
                 if button_restart {
                     defmt::info!("button held -> back to the beginning");
                     fx = update(model, &story, rng, Event::Restart);
-                    redraw |= fx.redraw;
+                    merge(&mut all, &fx);
                 }
-                if model.scene != before || fx.reveal.is_some() {
+                if model.scene != before || all.reveal.is_some() {
                     log_scene(model);
                 }
-                (fx, redraw)
+                all.leds = fx.leds;
+                all
             });
 
             if fx.chapter_complete {
                 defmt::info!("chapter complete");
             }
-            cx.shared.leds.lock(|leds| leds.set(fx.leds.0, fx.leds.1));
-            if redraw {
-                let _ = render::spawn();
-            }
+            cx.shared.cues.lock(|c| c.record(&fx, now));
+            cx.local.leds.set(fx.leds.0, fx.leds.1);
         }
     }
 
-    #[task(local = [display])]
-    async fn render(cx: render::Context) {
-        cx.local
-            .display
-            .framebuffer()
-            .fill(ui::theme::to_raw(ui::theme::BACKGROUND));
-        defmt::info!("lcd: painted the background color");
+    /// Folds the one-shot cues of `f` into `all`.
+    fn merge(all: &mut Effects, f: &Effects) {
+        all.redraw |= f.redraw;
+        all.scene_changed |= f.scene_changed;
+        all.chapter_complete |= f.chapter_complete;
+        all.dodged |= f.dodged;
+        all.ripple = f.ripple.or(all.ripple);
+        all.reveal = f.reveal.or(all.reveal);
+        all.nudge = f.nudge.or(all.nudge);
+    }
+
+    /// Draws the screen about 30 times a second, one band of rows at a time.
+    #[task(priority = 1, shared = [model, cues], local = [
+        display,
+        painter: Painter = Painter::new(),
+        band: [u16; BAND_LEN] = [0; BAND_LEN],
+        first: bool = true,
+    ])]
+    async fn render(mut cx: render::Context) {
+        let mut next = Mono::now();
+        loop {
+            let started = now_ms();
+            let model = cx.shared.model.lock(|m| *m);
+            let cues = cx.shared.cues.lock(|c| *c);
+            let painter = &mut *cx.local.painter;
+            painter.prepare(&model, &cues, started);
+
+            let band = &mut cx.local.band[..];
+            for (i, rows) in cx
+                .local
+                .display
+                .framebuffer()
+                .chunks_mut(BAND_LEN)
+                .enumerate()
+            {
+                let mut target = Band::new(&mut band[..rows.len()], i * BAND_ROWS);
+                let _ = painter.draw(&mut target);
+                rows.copy_from_slice(target.pixels());
+            }
+
+            if *cx.local.first {
+                *cx.local.first = false;
+                defmt::info!(
+                    "lcd: first frame drawn in {} ms",
+                    now_ms().wrapping_sub(started)
+                );
+            }
+
+            next += FRAME_MS.millis();
+            let now = Mono::now();
+            if next < now {
+                next = now;
+            }
+            Mono::delay_until(next).await;
+        }
     }
 }

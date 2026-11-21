@@ -17,7 +17,6 @@ bench = false
 [features]
 firmware = [
     "dep:bsp",
-    "dep:ui",
     "dep:cortex-m",
     "dep:cortex-m-rt",
     "dep:defmt",
@@ -30,8 +29,9 @@ firmware = [
 [dependencies]
 geometry = { path = "crates/geometry" }
 rng = { path = "crates/rng" }
+ui = { path = "ui" }
+embedded-graphics = { version = "0.8", default-features = false }
 bsp = { path = "crates/bsp", optional = true }
-ui = { path = "ui", optional = true }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"], optional = true }
 cortex-m-rt = { version = "0.7", optional = true }
 defmt = { version = "0.3", optional = true }
@@ -39,9 +39,6 @@ defmt-rtt = { version = "0.4", optional = true }
 panic-probe = { version = "0.3", features = ["print-defmt"], optional = true }
 rtic = { version = "2", features = ["thumbv7-backend"], optional = true }
 rtic-monotonics = { version = "2", features = ["cortex-m-systick"], optional = true }
-
-[dev-dependencies]
-ui = { path = "ui" }
 
 [build-dependencies]
 toml = { version = "0.8", default-features = false, features = ["parse"] }
