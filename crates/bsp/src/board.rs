@@ -75,7 +75,7 @@ impl Board {
         // HAL's own stm32h735g-dk example). Leaving the supply on its default
         // can hang the HAL waiting for the voltage to settle.
         let power = dp.PWR.constrain().smps().freeze();
-        step("power ok; clocks: 200 MHz from PLL1, LCD pixel clock from PLL3");
+        step("power ok; clocks: 400 MHz core from PLL1, LCD pixel clock from PLL3");
         let mut rcc = dp.RCC.constrain();
         let reset_by_watchdog = matches!(
             rcc.get_reset_reason(),
@@ -85,7 +85,10 @@ impl Board {
             defmt::warn!("init: the watchdog restarted the board (something hung)");
         }
         let clocks = rcc
-            .sys_ck(200.MHz())
+            // 400 MHz is the fastest the core may run at the default voltage
+            // (VOS1). The buses stay at their VOS1 limit of 200 MHz, so the
+            // peripherals see the same clocks as before.
+            .sys_ck(CORE_HZ.Hz())
             .hclk(200.MHz())
             .pll3_strategy(PllConfigStrategy::Iterative)
             .pll3_r_ck(PIXEL_CLOCK_HZ.Hz())
@@ -215,6 +218,10 @@ fn start_pll3() {
 fn step(name: &str) {
     defmt::info!("init: {=str}", name);
 }
+
+/// Core clock. 400 MHz is the VOS1 limit for the STM32H735 (RM0468); going
+/// to 520 MHz would need the higher VOS0 core voltage.
+pub const CORE_HZ: u32 = 400_000_000;
 
 const PIXEL_CLOCK_HZ: u32 = 9_630_000;
 const PANEL: DisplayConfiguration = DisplayConfiguration {
