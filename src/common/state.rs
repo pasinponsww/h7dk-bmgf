@@ -4,6 +4,7 @@
 
 use geometry::{Point, Rect};
 
+use crate::calendar::Date;
 use crate::story::{full_mask, Story};
 
 /// Logical screen width in pixels (the 4.3" LCD on the STM32H735G-DK).
@@ -133,6 +134,8 @@ pub struct Model {
     /// Photos in the album loaded from the external flash (0 for none). The
     /// celebration shows them as a slideshow.
     pub album: u16,
+    /// Today, from the real-time clock, once it knows.
+    pub today: Option<Date>,
 }
 
 impl Model {
@@ -153,6 +156,7 @@ impl Model {
             traced_ms: None,
             photo_ms: None,
             album: 0,
+            today: None,
         }
     }
 

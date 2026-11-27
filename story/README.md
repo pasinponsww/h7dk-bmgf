@@ -22,6 +22,10 @@ line = "Up to 160 characters, revealed when the object is tapped."
 zh = "Optional Chinese version of the line"
 pinyin = "Required if zh is given, and only then"
 
+[together]                   # optional
+since = "2024-02-14"         # the intro shows "day 652 of us", and on the day,
+                             # "happy anniversary"
+
 [question]                   # the whole table is optional
 text = "Will you be my girlfriend?"
 zh = "optional"

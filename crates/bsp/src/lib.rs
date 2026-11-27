@@ -2,6 +2,7 @@
 
 pub mod board;
 pub mod cache;
+pub mod clock;
 pub mod flash;
 pub mod hyperram;
 

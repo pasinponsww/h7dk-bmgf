@@ -99,6 +99,20 @@ fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
+/// The clock's moment in the app's calendar types.
+fn moment_of(t: bsp::clock::Moment) -> app::calendar::DateTime {
+    app::calendar::DateTime {
+        date: app::calendar::Date {
+            year: t.year,
+            month: t.month,
+            day: t.day,
+        },
+        hour: t.hour,
+        minute: t.minute,
+        second: t.second,
+    }
+}
+
 /// Reads the photo album off the external flash into the HyperRAM, if the
 /// flash has one and the HyperRAM works. Returns the photos, one after
 /// another, and how many there are. The HyperRAM is only switched on when
@@ -182,8 +196,9 @@ mod firmware {
     use ui::frame::Band;
 
     use super::{
-        load_album, log_scene, next_tap, now_ms, wait_for_top_blank, Mono, Ordering, BAND_LEN,
-        BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
+        load_album, log_scene, moment_of, next_tap, now_ms, wait_for_top_blank, Mono, Ordering,
+        BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN,
+        TICK_MS,
     };
 
     #[shared]
@@ -195,6 +210,7 @@ mod firmware {
     #[local]
     struct Local {
         painter: Painter,
+        clock: bsp::clock::Clock,
         leds: Leds,
         led_timer: LedTimer,
         button: Button,
@@ -231,6 +247,7 @@ mod firmware {
             mut watchdog,
             mut flash,
             hyperram,
+            mut clock,
             reset_by_watchdog,
             core_clock_hz,
             seed,
@@ -260,8 +277,30 @@ mod firmware {
         DWT::unlock();
         core.DWT.enable_cycle_counter();
 
+        // The real-time clock: set it from the time the firmware was built if
+        // it has lost the time or is behind it.
+        if let Some(built) = app::calendar::BUILT_AT {
+            let behind = clock.now().is_none_or(|now| moment_of(now) < built);
+            if behind {
+                clock.set(bsp::clock::Moment {
+                    year: built.date.year,
+                    month: built.date.month,
+                    day: built.date.day,
+                    hour: built.hour,
+                    minute: built.minute,
+                    second: built.second,
+                });
+                defmt::info!("clock: set from the build time");
+            }
+        }
+        match clock.now() {
+            Some(t) => defmt::info!("clock: {}", t),
+            None => defmt::info!("clock: not set (build with cargo proj to set it)"),
+        }
+
         let mut model = Model::new(0);
         model.album = album_count;
+        model.today = clock.now().map(|t| moment_of(t).date);
         log_scene(&model);
 
         tick::spawn().ok();
@@ -273,6 +312,7 @@ mod firmware {
                 cues: Cues::new(),
             },
             Local {
+                clock,
                 leds,
                 led_timer,
                 button,
@@ -294,7 +334,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, gesture: Gesture = Gesture::new()])]
+    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, clock, gesture: Gesture = Gesture::new(), last_date_read: u32 = 0])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -302,6 +342,13 @@ mod firmware {
             next += TICK_MS.millis();
             Mono::delay_until(next).await;
             let now = now_ms();
+
+            // Today's date, read from the real-time clock once a second.
+            if now.wrapping_sub(*cx.local.last_date_read) >= 1_000 {
+                *cx.local.last_date_read = now;
+                let today = cx.local.clock.now().map(|t| moment_of(t).date);
+                cx.shared.model.lock(|m| m.today = today);
+            }
 
             // Feed the watchdog only while the screen keeps drawing too.
             if cx.local.liveness.alive(FRAMES.load(Ordering::Relaxed), now) {

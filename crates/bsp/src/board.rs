@@ -18,6 +18,7 @@ use stm32h7xx_hal::rng::RngExt;
 use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
+use crate::clock::Clock;
 use crate::flash::ExternalFlash;
 use crate::hyperram::HyperRamPort;
 
@@ -41,6 +42,8 @@ pub struct Board {
     pub flash: ExternalFlash,
     /// The 16 MB HyperRAM on OCTOSPI2, off until it is started.
     pub hyperram: HyperRamPort,
+    /// The real-time clock.
+    pub clock: Clock,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -85,7 +88,8 @@ impl Board {
         // The STM32H735G-DK powers the core from the on-chip SMPS (as in the
         // HAL's own stm32h735g-dk example). Leaving the supply on its default
         // can hang the HAL waiting for the voltage to settle.
-        let power = dp.PWR.constrain().smps().freeze();
+        let mut power = dp.PWR.constrain().smps().freeze();
+        let backup = power.backup();
         step("power ok; clocks: 400 MHz core from PLL1, LCD pixel clock from PLL3");
         let mut rcc = dp.RCC.constrain();
         let reset_by_watchdog = matches!(
@@ -200,6 +204,13 @@ impl Board {
             clocks: clocks.clocks,
         };
 
+        step("real-time clock");
+        let clock = Clock::start(
+            dp.RTC,
+            backup.expect("the backup domain is taken only here"),
+            &clocks.clocks,
+        );
+
         step("random seed (RNG)");
         let seed = random_seed(dp.RNG, clocks.peripheral.RNG, &clocks.clocks);
 
@@ -216,6 +227,7 @@ impl Board {
             watchdog,
             flash,
             hyperram,
+            clock,
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

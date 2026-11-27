@@ -1,4 +1,5 @@
 pub mod album;
+pub mod calendar;
 pub mod event;
 pub mod frame_stats;
 pub mod gesture;

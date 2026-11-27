@@ -134,6 +134,67 @@ pub static TRACE: Trace = Trace {{ enabled: {enabled}, prompt: {prompt:?} }};
     )
 }
 
+/// `(year, month, day)` from "YYYY-MM-DD", if it is a real date.
+fn parse_date(s: &str) -> Option<(u16, u8, u8)> {
+    let mut parts = s.trim().splitn(3, '-');
+    let year: u16 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let day: u8 = parts.next()?.parse().ok()?;
+    let leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
+    let days = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => return None,
+    };
+    (1..=days).contains(&day).then_some((year, month, day))
+}
+
+/// `(year, month, day)`, `hour`, `minute`, `second`.
+type DateTimeParts = ((u16, u8, u8), u8, u8, u8);
+
+/// The parts of "YYYY-MM-DDTHH:MM:SS".
+fn parse_date_time(s: &str) -> Option<DateTimeParts> {
+    let (date, time) = s.trim().split_once('T')?;
+    let mut t = time.splitn(3, ':');
+    let hour: u8 = t.next()?.parse().ok()?;
+    let minute: u8 = t.next()?.parse().ok()?;
+    let second: u8 = t.next()?.get(..2)?.parse().ok()?;
+    (hour < 24 && minute < 60 && second < 60).then_some((parse_date(date)?, hour, minute, second))
+}
+
+/// `[together] since` from the story, and the PC's clock when the firmware
+/// was built (`H7_NOW`, set by `cargo proj mbedded ...`), for `calendar.rs`.
+fn write_clock(doc: &toml::Table, out: &Path) {
+    println!("cargo:rerun-if-env-changed=H7_NOW");
+    let since = section(doc, "together")
+        .and_then(|t| text(t, "since"))
+        .map(|s| {
+            parse_date(s).unwrap_or_else(|| {
+                fail(&format!(
+                    "[together]: \"since\" is \"{s}\", it must be a real date like 2024-02-14"
+                ))
+            })
+        });
+    let since = since.map_or("None".to_string(), |(y, m, d)| {
+        format!("Some(Date {{ year: {y}, month: {m}, day: {d} }})")
+    });
+    let now = env::var("H7_NOW").ok().and_then(|s| parse_date_time(&s));
+    let now = now.map_or("None".to_string(), |((y, mo, d), h, mi, s)| {
+        format!(
+            "Some(DateTime {{ date: Date {{ year: {y}, month: {mo}, day: {d} }}, hour: {h}, minute: {mi}, second: {s} }})"
+        )
+    });
+    let code = format!(
+        "/// When it all began (`[together] since` in the story).\n\
+         pub static TOGETHER_SINCE: Option<Date> = {since};\n\
+         /// The PC's local time when the firmware was built.\n\
+         pub static BUILT_AT: Option<DateTime> = {now};\n"
+    );
+    fs::write(out.join("clock.rs"), code).expect("could not write clock.rs");
+}
+
 /// One pixel font to bake from a TTF file.
 struct FontJob {
     /// The Rust name of the font.
@@ -563,4 +624,5 @@ fn write_story_table(root: &Path, out: &Path) {
     code.push_str(&trace_code(&doc));
 
     fs::write(out.join("chapters.rs"), code).expect("could not write chapters.rs");
+    write_clock(&doc, out);
 }

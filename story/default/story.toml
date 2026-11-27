@@ -1,3 +1,8 @@
+# When it all began: the intro counts the days since, and says happy
+# anniversary on the day. Leave it out to show neither.
+[together]
+since = "2024-02-14"
+
 [[chapter]]
 title = "The beginning"
 mood = "wow"

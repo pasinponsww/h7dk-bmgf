@@ -8,7 +8,9 @@ pub mod task;
 pub use common::event::{Effects, Event, TouchEvent};
 pub use common::state::{Model, Scene};
 pub use common::story::Story;
-pub use common::{album, event, frame_stats, gesture, liveness, pacing, state, story, trace};
+pub use common::{
+    album, calendar, event, frame_stats, gesture, liveness, pacing, state, story, trace,
+};
 pub use geometry::{Point, Rect};
 pub use rng::{Rng, XorShift32};
 pub use task::{leds, update};

@@ -392,7 +392,18 @@ impl Painter {
         ring(target, grow(button, 2 + pulse), 24, theme::TILE, 3)?;
         pill(target, button, theme::ICON, None)?;
         label(target, button, INTRO_BUTTON, theme::ON_ICON)?;
-        text_centered(target, INTRO_HINT, center, 204, &FONT_7X13, theme::MUTED)
+        text_centered(target, INTRO_HINT, center, 204, &FONT_7X13, theme::MUTED)?;
+        // How long it has been, or happy anniversary on the day.
+        if let Some(line) = together_line(self.model.today) {
+            let at = GPoint::new(center - text_width(line.as_str(), &VT323) / 2, 226);
+            let color = if line.as_str().starts_with("happy") {
+                theme::HEART
+            } else {
+                theme::ICON
+            };
+            font_text(target, line.as_str(), at, &VT323, 1, color)?;
+        }
+        Ok(())
     }
 
     fn story<D>(
@@ -962,6 +973,25 @@ where
     RoundedRectangle::with_equal_corners(area, Size::new(radius, radius))
         .into_styled(style.build())
         .draw(target)
+}
+
+/// The intro's line about the two of you: "day 652 of us", or "happy
+/// anniversary! (1 year)" on the day. `None` without a date or a start date.
+fn together_line(today: Option<crate::calendar::Date>) -> Option<Line> {
+    let since = crate::calendar::TOGETHER_SINCE?;
+    let today = today?;
+    let mut line = Line::new();
+    match crate::calendar::anniversary(since, today) {
+        Some(1) => write!(line, "happy anniversary! (1 year)").ok()?,
+        Some(years) => write!(line, "happy anniversary! ({years} years)").ok()?,
+        None => write!(
+            line,
+            "day {} of us",
+            crate::calendar::day_together(since, today)?
+        )
+        .ok()?,
+    }
+    Some(line)
 }
 
 /// How far a polaroid that came out `age` ms ago has developed, in
@@ -1845,6 +1875,25 @@ mod tests {
         assert!(frame_white(&mut Painter::with_album(&ALBUM), &r.m) > 3_000);
         assert_ne!(r.m.dog_rect(), before, "the dog makes room");
         assert!(r.m.dog_rect().w < before.w, "and sits smaller");
+    }
+
+    #[test]
+    fn the_intro_counts_the_days_and_remembers_the_anniversary() {
+        use crate::calendar::{Date, TOGETHER_SINCE};
+        let since = TOGETHER_SINCE.expect("the default story has a start date");
+        assert!(together_line(None).is_none(), "no clock, no line");
+        let next_day = Date::new(since.year, since.month, since.day + 1).unwrap();
+        assert_eq!(
+            together_line(Some(next_day)).unwrap().as_str(),
+            "day 2 of us"
+        );
+        let year_on = Date::new(since.year + 1, since.month, since.day).unwrap();
+        assert_eq!(
+            together_line(Some(year_on)).unwrap().as_str(),
+            "happy anniversary! (1 year)"
+        );
+        let before = Date::new(since.year - 1, 1, 1).unwrap();
+        assert!(together_line(Some(before)).is_none(), "not yet together");
     }
 
     #[test]
