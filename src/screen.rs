@@ -28,6 +28,8 @@ use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
 use crate::fonts::{PRESS_START, VT323};
+use crate::moment::{stage, Moment, Stage};
+use crate::stagecraft;
 use crate::state::{
     Model, Scene, MAX_DODGES, NEXT_BUTTON, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, SLIDESHOW_CARD,
 };
@@ -35,6 +37,7 @@ use crate::story::{full_mask, Content, CHAPTERS, ENDING, FINALE, TRACE};
 use crate::trace::{self, DOTS, DOT_AT};
 use crate::warmth::{feel, Feel};
 use crate::{Point, Rect};
+use ui::places::{self, Place};
 
 /// How long a touch ripple grows, in milliseconds.
 const RIPPLE_MS: u32 = 450;
@@ -219,6 +222,35 @@ fn mood(model: &Model, t_ms: u32) -> Mood {
     }
 }
 
+/// On a story page, the stage: the moment of the object whose line is up
+/// (from when it was tapped), or the chapter's place with the dogs
+/// wandering about.
+fn story_stage(model: &Model, cues: &Cues, t_ms: u32) -> Option<Stage> {
+    let Scene::Story { chapter, shown, .. } = model.scene else {
+        return None;
+    };
+    let page = CHAPTERS.get(usize::from(chapter))?;
+    let since_scene = t_ms.wrapping_sub(model.scene_start_ms);
+    let (moment, since) =
+        match shown.and_then(|i| page.hotspots.get(usize::from(i)).map(|h| (i, h))) {
+            Some((i, h)) => {
+                let since = match cues.reveal {
+                    Some((j, at)) if j == i => t_ms.wrapping_sub(at),
+                    _ => since_scene,
+                };
+                (h.moment, since)
+            }
+            None => (
+                Moment {
+                    place: page.place,
+                    act: page.act,
+                },
+                since_scene,
+            ),
+        };
+    Some(stage(&moment, since))
+}
+
 /// Where the dog sits right now, and how big each sprite pixel is.
 fn dog_place(model: &Model) -> (GPoint, u32) {
     let (x, y, scale) = model.dog_spot();
@@ -252,6 +284,10 @@ pub struct Painter {
     lean: i8,
     /// The secret message, once it has been opened.
     secret: Option<crate::secret::Opened>,
+    /// On a story page: the place, the dogs and their props this frame.
+    stage: Option<Stage>,
+    /// The background this frame.
+    place: Place,
 }
 
 impl Default for Painter {
@@ -274,6 +310,8 @@ impl Painter {
             lift: 0,
             lean: 0,
             secret: None,
+            stage: None,
+            place: Place::Pink,
         }
     }
 
@@ -333,6 +371,14 @@ impl Painter {
         mascot::render(&pose, &mut self.dog);
         self.lift = pose.lift;
         self.lean = pose.dx;
+        self.stage = story_stage(model, cues, t_ms);
+        self.place = match (self.stage, model.scene) {
+            (Some(s), _) => s.place,
+            (None, Scene::Finale { slide }) => FINALE
+                .get(usize::from(slide))
+                .map_or(Place::Pink, |s| s.place),
+            _ => Place::Pink,
+        };
     }
 
     /// Draws the prepared frame. Only the part inside the target's bounding
@@ -342,8 +388,12 @@ impl Painter {
         D: DrawTarget<Color = Rgb565>,
     {
         let clip = target.bounding_box();
-        target.fill_solid(&clip, theme::BACKGROUND)?;
-        self.draw_backdrop(target)?;
+        if self.place == Place::Pink {
+            target.fill_solid(&clip, theme::BACKGROUND)?;
+            self.draw_backdrop(target)?;
+        } else {
+            places::draw(target, self.place, self.t_ms)?;
+        }
         match self.model.scene {
             Scene::Intro => self.intro(target)?,
             Scene::Story {
@@ -356,10 +406,13 @@ impl Painter {
             Scene::Question => self.question(target)?,
             Scene::Celebration => self.celebration(target)?,
         }
-        let (at, scale) = dog_place(&self.model);
-        self.dog_shadow(target, at, scale)?;
-        self.draw_dog(target, at, scale)?;
-        self.pet_hearts(target)?;
+        // On story pages the dogs are on the stage instead.
+        if self.stage.is_none() {
+            let (at, scale) = dog_place(&self.model);
+            self.dog_shadow(target, at, scale)?;
+            self.draw_dog(target, at, scale)?;
+            self.pet_hearts(target)?;
+        }
         self.sweat(target)?;
         self.speech_bubble(target)?;
         self.ripple(target)?;
@@ -541,6 +594,18 @@ impl Painter {
         let Some(page) = CHAPTERS.get(ch) else {
             return Ok(());
         };
+
+        // The dogs and their props, under everything else on the page.
+        if let Some(stage) = &self.stage {
+            stagecraft::draw(target, stage)?;
+            // Over a place, the title sits on a soft plate to stay readable.
+            if stage.place != Place::Pink {
+                let lines = wrap(page.title, 15).take(2);
+                let (n, widest) = lines.fold((0, 0), |(n, w), l| (n + 1, w.max(pixel_width(l, 2))));
+                let plate = Rect::new(6, 6, to_i16(widest + 20), to_i16(n * 20 + 26));
+                rounded(target, plate, 10, theme::SURFACE, Some((theme::MAUVE, 2)))?;
+            }
+        }
 
         // Title, wrapped to the left column, then one dot per chapter.
         let mut y = 14;
@@ -802,6 +867,16 @@ impl Painter {
             step,
             t_ms: self.t_ms,
         };
+        // On a dark place the words sit on a soft plate.
+        if self.place.is_dark() {
+            let plate = if s.photo.is_some() {
+                Rect::new(12, 30, 258, 150)
+            } else {
+                Rect::new(16, 40, 448, 140)
+            };
+            rounded(target, plate, 12, theme::SURFACE, Some((theme::MAUVE, 2)))?;
+        }
+        self.finale_props(target, s.props, s.photo.is_some())?;
         match s.photo {
             Some(photo) => {
                 polaroid_at(
@@ -844,6 +919,47 @@ impl Painter {
             }
         }
         self.finale_dots(target, slide)
+    }
+
+    /// A slide's props, bobbing round the words: along the top and bottom
+    /// of the page, keeping clear of the photo and the dog in the corner.
+    fn finale_props<D>(
+        &self,
+        target: &mut D,
+        props: &[crate::moment::Prop],
+        photo: bool,
+    ) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        const WIDE: [(i32, i32); 6] = [
+            (60, 16),
+            (220, 10),
+            (380, 16),
+            (130, 192),
+            (270, 198),
+            (400, 190),
+        ];
+        const BESIDE: [(i32, i32); 6] = [
+            (24, 14),
+            (120, 8),
+            (210, 16),
+            (110, 196),
+            (190, 200),
+            (240, 186),
+        ];
+        let spots = if photo { &BESIDE } else { &WIDE };
+        for (k, (&prop, &(x, y))) in (0u32..).zip(props.iter().zip(spots.iter())) {
+            let bob = triangle(self.t_ms + k * 350, 1_800, 6);
+            let s = crate::moment::Shown {
+                prop,
+                x,
+                y: y + bob,
+                scale: 3,
+            };
+            stagecraft::prop(target, &s)?;
+        }
+        Ok(())
     }
 
     /// One small dot per finale slide along the bottom right: done ones in
@@ -1864,13 +1980,18 @@ mod tests {
     }
 
     #[test]
-    fn every_scene_draws_the_dog_on_the_pink_background() {
+    fn every_scene_draws_the_dog_on_its_background() {
         let mut p = Painter::new();
         for (m, cues) in scenes() {
             for t in [WIPE_MS, 1_000, 2_500, 5_000] {
                 p.prepare(&m, &cues, m.now_ms + t);
                 let f = full_frame(&p);
-                assert!(count(&f, theme::BACKGROUND) > f.len() / 3, "{:?}", m.scene);
+                // Pink, unless the story page happens somewhere else.
+                if p.place == Place::Pink {
+                    assert!(count(&f, theme::BACKGROUND) > f.len() / 3, "{:?}", m.scene);
+                } else {
+                    assert!(count(&f, theme::BACKGROUND) < f.len() / 10, "{:?}", m.scene);
+                }
                 assert!(
                     count(&f, theme::mascot_color(b'W').unwrap()) > 300,
                     "{:?}",
@@ -2334,6 +2455,49 @@ mod tests {
             jumping < standing,
             "smaller in the air: {jumping} < {standing}"
         );
+    }
+
+    #[test]
+    fn a_story_page_puts_the_moment_of_the_tapped_object_on_stage() {
+        let mut r = Rig::new();
+        r.tap(300, 30);
+        let mut p = Painter::new();
+        // Chapter 1 is in the club room, the dogs watching each other.
+        p.prepare(&r.m, &Cues::new(), r.m.now_ms + WIPE_MS);
+        let idle = p.stage.expect("a stage on story pages");
+        assert_eq!(idle.place, CHAPTERS[0].place);
+        assert!(idle.her.is_some(), "both dogs are there");
+        // Tapping the first object plays its moment from the tap.
+        let first = CHAPTERS[0].hotspots[0];
+        let fx = r.tap_rect(first.rect);
+        let mut cues = Cues::new();
+        cues.record(&fx, r.m.now_ms);
+        p.prepare(&r.m, &cues, r.m.now_ms + 100);
+        let s = p.stage.unwrap();
+        assert_eq!(s, stage(&first.moment, 100));
+        assert!(
+            Painter::new().stage.is_none(),
+            "no stage before a story page"
+        );
+    }
+
+    #[test]
+    fn finale_slides_are_dreamy_and_float_their_props() {
+        let with_props = FINALE
+            .iter()
+            .position(|s| !s.props.is_empty())
+            .expect("the default finale has a slide with props");
+        let mut m = Model::new(0);
+        m.scene = Scene::Finale {
+            slide: to_u8(with_props),
+        };
+        let mut p = Painter::new();
+        p.prepare(&m, &Cues::new(), 2_000);
+        assert_eq!(p.place, Place::Dream);
+        let f = full_frame(&p);
+        // The phone's screen blue only shows if the props are up.
+        let blue = theme::to_raw(ui::sprite::color(b'I').unwrap());
+        assert!(f.iter().filter(|&&px| px == blue).count() > 20);
     }
 
     #[test]

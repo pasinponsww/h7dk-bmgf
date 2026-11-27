@@ -257,8 +257,12 @@ impl Model {
         }
     }
 
-    /// The part of the screen the dog covers right now.
+    /// The part of the screen the dog covers right now. On story pages the
+    /// dogs are busy acting out the moment, so they cannot be petted there.
     pub const fn dog_rect(&self) -> Rect {
+        if matches!(self.scene, Scene::Story { .. }) {
+            return Rect::new(0, 0, 0, 0);
+        }
         spot_rect(self.dog_spot())
     }
 

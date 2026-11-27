@@ -2,6 +2,9 @@
 use geometry::Rect;
 use ui::icon::Icon;
 use ui::photo::Photo;
+use ui::places::Place;
+
+use crate::moment::Moment;
 
 /// Read-only view of the story.
 pub trait Story {
@@ -39,6 +42,10 @@ pub struct Slide {
     pub line: &'static str,
     /// A photo shown as a polaroid next to it.
     pub photo: Option<&'static Photo>,
+    /// The background (dreamy unless the story says otherwise).
+    pub place: Place,
+    /// Props floating round the words.
+    pub props: &'static [crate::moment::Prop],
 }
 
 /// How long a slide with `line` stays: time to type it (28 ms a character),
@@ -76,6 +83,8 @@ pub struct Hotspot {
     pub zh: &'static str,
     /// Pinyin for `zh`, or empty.
     pub pinyin: &'static str,
+    /// What the dogs do while its line is up.
+    pub moment: Moment,
 }
 
 /// One chapter of the story.
@@ -85,6 +94,10 @@ pub struct Chapter {
     pub title: &'static str,
     /// Name of the mascot mood on this page, or empty for the default.
     pub mood: &'static str,
+    /// Where the page happens, until an object's moment says otherwise.
+    pub place: Place,
+    /// What the dogs do on the page before any object's line is up.
+    pub act: crate::moment::Act,
     /// A photo that develops as a polaroid once every object is found.
     pub photo: Option<&'static Photo>,
     /// Written under the photo, or empty.
@@ -141,6 +154,8 @@ pub struct Ending {
     pub message: Phrase,
 }
 
+// Only build.rs calls this, once per object, with every field spelled out.
+#[allow(clippy::too_many_arguments)]
 const fn hs(
     count: usize,
     index: usize,
@@ -149,6 +164,7 @@ const fn hs(
     line: &'static str,
     zh: &'static str,
     pinyin: &'static str,
+    moment: Moment,
 ) -> Hotspot {
     let (x, y) = slot(count, index);
     Hotspot {
@@ -158,6 +174,7 @@ const fn hs(
         line,
         zh,
         pinyin,
+        moment,
     }
 }
 
@@ -295,6 +312,24 @@ mod tests {
         for (p, side) in photos {
             assert_eq!(p.size, side);
             assert_eq!(p.px.len(), usize::from(side) * usize::from(side) * 2);
+        }
+    }
+
+    #[test]
+    fn the_story_files_names_match_the_places_and_acts() {
+        // build.rs keeps its own lists to check story files with; they
+        // must match the real ones.
+        let build = include_str!("../../build.rs");
+        let quoted = |name: &str| {
+            build
+                .match_indices(name)
+                .any(|(i, _)| build[..i].ends_with('"') && build[i + name.len()..].starts_with('"'))
+        };
+        for name in ui::places::Place::NAMES
+            .iter()
+            .chain(crate::moment::Act::NAMES.iter())
+        {
+            assert!(quoted(name), "{name} is missing from build.rs");
         }
     }
 

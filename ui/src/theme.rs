@@ -75,6 +75,32 @@ pub const fn mascot_rgb(c: u8) -> Option<[u8; 3]> {
     }
 }
 
+/// 8-bit RGB of any sprite character: the mascot's, and the walking dogs'
+/// props and clothes. `None` for a clear cell.
+///
+/// Y yellow, y deep yellow, O orange, R red, U blue, M matcha green,
+/// G leaf green, C cream, n brown, X black cloth, Z sky blue, A metal grey,
+/// I screen blue, F salmon.
+pub const fn sprite_rgb(c: u8) -> Option<[u8; 3]> {
+    match c {
+        b'Y' => Some([0xFF, 0xD9, 0x5A]),
+        b'y' => Some([0xE8, 0xB0, 0x3A]),
+        b'O' => Some([0xF5, 0x9E, 0x4C]),
+        b'R' => Some([0xE8, 0x50, 0x5B]),
+        b'U' => Some([0x5B, 0x8D, 0xEF]),
+        b'M' => Some([0x9C, 0xC8, 0x6A]),
+        b'G' => Some([0x5E, 0x8C, 0x3A]),
+        b'C' => Some([0xFF, 0xF3, 0xD6]),
+        b'n' => Some([0x8B, 0x5A, 0x3C]),
+        b'X' => Some([0x2A, 0x2A, 0x32]),
+        b'Z' => Some([0x9E, 0xD8, 0xF0]),
+        b'A' => Some([0xA8, 0xAE, 0xBC]),
+        b'I' => Some([0x7F, 0xB3, 0xFF]),
+        b'F' => Some([0xFF, 0x8A, 0x65]),
+        _ => mascot_rgb(c),
+    }
+}
+
 /// The display color of a mascot sprite character, or `None` for a transparent cell.
 pub fn mascot_color(c: u8) -> Option<Rgb565> {
     mascot_rgb(c).map(|[r, g, b]| rgb(r, g, b))

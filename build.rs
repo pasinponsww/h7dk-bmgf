@@ -165,6 +165,94 @@ fn secret_code(doc: &toml::Table) -> String {
     )
 }
 
+/// The places a moment can happen in (as `ui::places::Place::NAMES`).
+const PLACES: [&str; 10] = [
+    "pink", "club", "beach", "fall", "cinema", "city", "museum", "night", "cafe", "dream",
+];
+/// The acts the dogs can play (as `app::moment::Act::NAMES`).
+const ACTS: [&str; 22] = [
+    "wander",
+    "wow",
+    "smitten",
+    "think",
+    "excited",
+    "heartbeat",
+    "laugh",
+    "grin",
+    "summer",
+    "chill",
+    "gaze",
+    "movie",
+    "scared",
+    "gelato",
+    "treats",
+    "museum",
+    "stroll",
+    "hug",
+    "ramen",
+    "matcha",
+    "zoomies",
+    "love",
+];
+
+/// A name from `names` as its Rust variant: "club" is `Club`.
+fn variant(name: &str) -> String {
+    let mut c = name.chars();
+    c.next()
+        .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+        .unwrap_or_default()
+}
+
+/// Checks `name` is one of `names` (a `what` in `label`).
+fn one_of<'a>(name: &'a str, names: &[&str], what: &str, label: &str) -> &'a str {
+    if !names.contains(&name) {
+        fail(&format!(
+            "{label}: there is no {what} called \"{name}\". The {what}s are: {}",
+            names.join(", ")
+        ));
+    }
+    name
+}
+
+/// The moment for an object: its `moment` table's place (the chapter's if
+/// left out) and act (wandering if left out), as Rust code.
+fn moment_code(object: &toml::Table, chapter_place: &str, label: &str) -> String {
+    let empty = toml::Table::new();
+    let m = match object.get("moment") {
+        None => &empty,
+        Some(v) => v
+            .as_table()
+            .unwrap_or_else(|| fail(&format!("{label}: \"moment\" must be a table"))),
+    };
+    let place = text(m, "place").map_or(chapter_place, |p| one_of(p, &PLACES, "place", label));
+    let act = text(m, "act").map_or("wander", |a| one_of(a, &ACTS, "act", label));
+    format!(
+        "crate::moment::Moment {{ place: ui::places::Place::{}, act: crate::moment::Act::{} }}",
+        variant(place),
+        variant(act)
+    )
+}
+
+/// The props a finale slide may float about, and their Rust variants (as
+/// `app::moment::Prop`).
+const PROPS: [(&str, &str); 13] = [
+    ("thought", "Thought"),
+    ("heart", "Heart"),
+    ("laptop", "Laptop"),
+    ("sun", "Sun"),
+    ("popcorn", "Popcorn"),
+    ("gelato", "Gelato"),
+    ("boba", "Boba"),
+    ("sushi", "Sushi"),
+    ("ramen", "Ramen"),
+    ("phone", "Phone"),
+    ("matcha", "Matcha"),
+    ("note", "Note"),
+    ("sparkle", "Sparkle"),
+];
+/// The most props one finale slide may float about.
+const MAX_SLIDE_PROPS: usize = 6;
+
 /// Finale photos are baked at this many pixels square (50 KB of flash each).
 const FINALE_PX: u32 = 160;
 /// The most different photos the finale may use: they live in the chip's
@@ -213,7 +301,41 @@ fn finale_code(doc: &toml::Table, dir: &Path, out: &Path) -> String {
             }
             None => "None".to_string(),
         };
-        writeln!(rows, "    Slide {{ line: {line:?}, photo: {photo} }},").unwrap();
+        let place = text(table, "place").map_or("dream", |p| one_of(p, &PLACES, "place", &label));
+        let props: Vec<String> = table
+            .get("props")
+            .map(|v| {
+                v.as_array()
+                    .unwrap_or_else(|| fail(&format!("{label}: \"props\" must be a list")))
+                    .iter()
+                    .map(|p| {
+                        let name = p.as_str().unwrap_or("");
+                        let found = PROPS.iter().find(|(n, _)| *n == name);
+                        let Some((_, variant)) = found else {
+                            let names: Vec<&str> = PROPS.iter().map(|(n, _)| *n).collect();
+                            fail(&format!(
+                                "{label}: there is no prop called \"{name}\". The props are: {}",
+                                names.join(", ")
+                            ));
+                        };
+                        format!("crate::moment::Prop::{variant}")
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if props.len() > MAX_SLIDE_PROPS {
+            fail(&format!(
+                "{label}: {} props, a slide may have {MAX_SLIDE_PROPS}",
+                props.len()
+            ));
+        }
+        writeln!(
+            rows,
+            "    Slide {{ line: {line:?}, photo: {photo}, place: ui::places::Place::{}, props: &[{}] }},",
+            variant(place),
+            props.join(", ")
+        )
+        .unwrap();
     }
     format!(
         "{statics}/// The finale: slides between the drawn heart and the question.\npub static FINALE: [Slide; {}] = [\n{rows}];\n",
@@ -684,6 +806,8 @@ fn write_story_table(root: &Path, out: &Path) {
         }
 
         let mood = limited(table, "mood", 12, &label).unwrap_or("");
+        let place = text(table, "place").map_or("pink", |p| one_of(p, &PLACES, "place", &label));
+        let idle = text(table, "act").map_or("wander", |a| one_of(a, &ACTS, "act", &label));
         let caption = limited(table, "caption", 16, &label).unwrap_or("");
         let photo = match text(table, "photo") {
             Some(file) => {
@@ -696,7 +820,9 @@ fn write_story_table(root: &Path, out: &Path) {
 
         writeln!(
             code,
-            "    Chapter {{ title: {title:?}, mood: {mood:?}, photo: {photo}, caption: {caption:?}, hotspots: &["
+            "    Chapter {{ title: {title:?}, mood: {mood:?}, place: ui::places::Place::{}, act: crate::moment::Act::{}, photo: {photo}, caption: {caption:?}, hotspots: &[",
+            variant(place),
+            variant(idle)
         )
         .unwrap();
         for (oi, object) in objects.iter().enumerate() {
@@ -723,9 +849,10 @@ fn write_story_table(root: &Path, out: &Path) {
             let (zh, pinyin) = chinese(table, &label);
             writeln!(
                 code,
-                "        hs({}, {oi}, {icon:?}, &{}, {line:?}, {zh:?}, {pinyin:?}),",
+                "        hs({}, {oi}, {icon:?}, &{}, {line:?}, {zh:?}, {pinyin:?}, {}),",
                 objects.len(),
                 icon_ident(icon),
+                moment_code(table, place, &label),
             )
             .unwrap();
         }

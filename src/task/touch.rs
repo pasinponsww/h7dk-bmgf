@@ -785,12 +785,14 @@ mod tests {
     }
 
     #[test]
-    fn petting_the_dog_on_a_story_page_keeps_the_page() {
+    fn on_a_story_page_the_dogs_are_acting_and_not_petted() {
         let mut r = Rig::new();
         r.tap(1, 1);
         r.tap_rect(CH0[0]);
-        let fx = r.tap_rect(dog_rect(r.m.scene));
-        assert!(fx.petted && fx.redraw);
+        assert_eq!(r.m.dog_rect().w, 0, "nothing to pet on a story page");
+        // A tap where the old dog sat is just a miss.
+        let fx = r.tap(120, 130);
+        assert!(!fx.petted);
         assert_eq!(
             story_state(&r.m),
             (0, 0b01, Some(0)),

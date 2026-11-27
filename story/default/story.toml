@@ -3,25 +3,33 @@
 [together]
 since = "2024-02-14"
 
+# Each page happens somewhere (place) and the two dogs act out each line
+# (moment). See story/README.md for every place and act.
 [[chapter]]
 title = "The beginning"
 mood = "wow"
+place = "club"
+act = "excited"
 
 [[chapter.object]]
 icon = "door"
+moment = { act = "wow" }
 line = "Replace this with how it started. Keep each line short."
 
 [[chapter.object]]
 icon = "sparkle"
+moment = { act = "smitten" }
 line = "Every object on the screen holds one line like this."
 
 [[chapter.object]]
 icon = "chat-circle-dots"
+moment = { act = "think" }
 line = "Tap an object to read its line. Find them all to go on."
 
 [[chapter]]
 title = "Something together"
 mood = "happy"
+place = "city"
 # A photo next to story.toml (jpg or png). Once every object on the page is
 # found it develops as a polaroid: 128 x 128 on the screen, 32 KB of flash.
 photo = "photo.png"
@@ -29,22 +37,27 @@ caption = "us <3"
 
 [[chapter.object]]
 icon = "calendar-heart"
+moment = { act = "stroll" }
 line = "Add a memory here."
 
 [[chapter.object]]
 icon = "ice-cream"
+moment = { act = "gelato" }
 line = "Add another one here."
 
 [[chapter]]
 title = "Now"
 mood = "love"
+place = "pink"
 
 [[chapter.object]]
 icon = "star"
+moment = { act = "grin" }
 line = "Say what you like about them."
 
 [[chapter.object]]
 icon = "heart"
+moment = { act = "love" }
 line = "End on something kind."
 
 [question]
@@ -63,6 +76,8 @@ prompt = "Draw a heart for me"
 # A slide is a sentence, with or without a photo. Photos are shown big
 # (160 x 160, about 50 KB of the chip's flash each, 14 different ones at most).
 # Each slide stays long enough to read it; this one takes about 3.5 minutes.
+# Slides happen in the dreamy place unless one sets its own place = "...", and
+# props = [...] floats up to 6 props round the words.
 # The photo lines all point at the placeholder: give each its own picture.
 [[finale]]
 line = "Before I ask you something, I want to tell you a few things."
@@ -95,6 +110,7 @@ line = "You're patient with me, and I never take that for granted."
 
 [[finale]]
 line = "When something good happens, you're the first person I want to tell."
+props = ["phone", "heart", "sparkle"]
 
 [[finale]]
 photo = "photo.png"            # photo 6 of 12

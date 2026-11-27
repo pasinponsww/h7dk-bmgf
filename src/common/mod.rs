@@ -4,6 +4,7 @@ pub mod event;
 pub mod frame_stats;
 pub mod gesture;
 pub mod liveness;
+pub mod moment;
 pub mod pacing;
 pub mod save;
 pub mod secret;
