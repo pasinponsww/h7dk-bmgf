@@ -252,6 +252,7 @@ mod firmware {
 
     #[local]
     struct Local {
+        thermometer: bsp::thermo::Thermometer,
         painter: Painter,
         cordic: bsp::cordic::Cordic,
         save: bsp::storage::SaveSector,
@@ -296,6 +297,7 @@ mod firmware {
             mut clock,
             save,
             cordic,
+            thermometer,
             reset_by_watchdog,
             core_clock_hz,
             seed,
@@ -369,6 +371,7 @@ mod firmware {
                 cues: Cues::new(),
             },
             Local {
+                thermometer,
                 cordic,
                 save,
                 saved: found,
@@ -394,7 +397,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, clock, save, saved, gesture: Gesture = Gesture::new(), last_date_read: u32 = 0])]
+    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, clock, save, saved, thermometer, gesture: Gesture = Gesture::new(), last_date_read: u32 = 0])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -407,7 +410,20 @@ mod firmware {
             if now.wrapping_sub(*cx.local.last_date_read) >= 1_000 {
                 *cx.local.last_date_read = now;
                 let today = cx.local.clock.now().map(|t| moment_of(t).date);
-                cx.shared.model.lock(|m| m.today = today);
+                // And how warm the chip is.
+                let (cal30, cal110) = bsp::thermo::Thermometer::calibration();
+                let celsius = cx
+                    .local
+                    .thermometer
+                    .read()
+                    .and_then(|raw| app::warmth::celsius(raw, cal30, cal110));
+                cx.shared.model.lock(|m| {
+                    m.today = today;
+                    if m.celsius.is_none() {
+                        defmt::info!("chip temperature: {} C", celsius.unwrap_or(i16::MIN));
+                    }
+                    m.celsius = celsius;
+                });
             }
 
             // Feed the watchdog only while the screen keeps drawing too.

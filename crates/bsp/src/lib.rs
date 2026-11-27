@@ -7,6 +7,7 @@ pub mod cordic;
 pub mod flash;
 pub mod hyperram;
 pub mod storage;
+pub mod thermo;
 
 pub use board::{
     Board, Button, Display, LedTimer, Leds, Touch, TouchPoint, Watchdog, LCD_HEIGHT, LCD_PIXELS,

@@ -33,6 +33,7 @@ use crate::state::{
 };
 use crate::story::{full_mask, Content, CHAPTERS, ENDING, TRACE};
 use crate::trace::{self, DOTS, DOT_AT};
+use crate::warmth::{feel, Feel};
 use crate::{Point, Rect};
 
 /// How long a touch ripple grows, in milliseconds.
@@ -178,6 +179,8 @@ fn mood(model: &Model, t_ms: u32) -> Mood {
         Scene::Intro => match model.attracting_for(t_ms) {
             // Untouched for a while: jump around, then bounce, again and again.
             Some(a) if a % ATTRACT_CYCLE_MS < ATTRACT_JUMP_MS => Mood::Cheer,
+            // A cold board: the dog shivers.
+            _ if feel(model.celsius) == Feel::Cold => Mood::Scared,
             _ => Mood::Happy,
         },
         Scene::Story { chapter, .. } => CHAPTERS
@@ -314,6 +317,7 @@ impl Painter {
         let (at, scale) = dog_place(&self.model);
         self.draw_dog(target, at, scale)?;
         self.pet_hearts(target)?;
+        self.sweat(target)?;
         self.speech_bubble(target)?;
         self.ripple(target)?;
         if let Some((center, size)) = self.wipe() {
@@ -825,7 +829,12 @@ impl Painter {
         };
         let dog = self.model.dog_rect();
         let bob = to_i16(triangle(age, 1_000, 4));
-        let w = to_i16(text_width(ATTRACT_LINE, &FONT_7X13)) + 20;
+        let line = match feel(self.model.celsius) {
+            Feel::Cold => "brr! tap me",
+            Feel::Hot => "phew! tap me",
+            Feel::Comfy => ATTRACT_LINE,
+        };
+        let w = to_i16(text_width(line, &FONT_7X13)) + 20;
         let bubble = Rect::new(dog.x + dog.w / 2 + 6, 8 + bob, w, 28);
         // The tail points down and left, towards the dog's head.
         let (bx, by) = (i32::from(bubble.x), i32::from(bubble.y + bubble.h));
@@ -847,7 +856,37 @@ impl Painter {
             &Rectangle::new(GPoint::new(bx + 12, by - 3), Size::new(10, 3)),
             theme::SURFACE,
         )?;
-        label(target, bubble, ATTRACT_LINE, theme::ICON)
+        label(target, bubble, line, theme::ICON)
+    }
+
+    /// On a hot board, drops of sweat run down beside the dog's head on the
+    /// intro, one after another.
+    fn sweat<D>(&self, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        if self.model.scene != Scene::Intro || feel(self.model.celsius) != Feel::Hot {
+            return Ok(());
+        }
+        let dog = self.model.dog_rect();
+        let side = [i32::from(dog.x) + 6, i32::from(dog.x + dog.w) - 12];
+        for (k, x) in (0u32..).zip(side) {
+            let age = to_i32_u((self.t_ms + k * 700) % 1_400);
+            let y = i32::from(dog.y) + 30 + age * 40 / 1_400;
+            // A drop: round at the bottom, pointed at the top.
+            let style = PrimitiveStyle::with_fill(theme::SWEAT);
+            Circle::new(GPoint::new(x, y + 3), 7)
+                .into_styled(style)
+                .draw(target)?;
+            Triangle::new(
+                GPoint::new(x + 3, y - 3),
+                GPoint::new(x, y + 5),
+                GPoint::new(x + 6, y + 5),
+            )
+            .into_styled(style)
+            .draw(target)?;
+        }
+        Ok(())
     }
 
     /// Small hearts that pop out of the dog's head and float up after a pet,
@@ -2012,6 +2051,24 @@ mod tests {
             let diff = upright.abs_diff(turned);
             assert!(diff * 10 < upright, "{upright} vs {turned}");
         }
+    }
+
+    #[test]
+    fn the_dog_shivers_when_cold_and_sweats_when_hot() {
+        let mut m = Model::new(0);
+        let t = 2_000;
+        assert_eq!(mood(&m, t), Mood::Happy);
+        m.celsius = Some(10);
+        assert_eq!(mood(&m, t), Mood::Scared, "shivering");
+        let mut p = Painter::new();
+        let mut sweat = |m: &Model| {
+            p.prepare(m, &Cues::new(), t);
+            count(&full_frame(&p), theme::SWEAT)
+        };
+        assert_eq!(sweat(&m), 0);
+        m.celsius = Some(75);
+        assert!(sweat(&m) > 40, "drops of sweat");
+        assert_eq!(mood(&m, t), Mood::Happy, "panting, tongue out");
     }
 
     #[test]

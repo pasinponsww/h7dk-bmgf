@@ -142,6 +142,8 @@ pub struct Model {
     pub resume: Resume,
     /// How many times she has said yes, on this board, ever.
     pub yes_count: u32,
+    /// The chip's temperature in °C, once it has been read.
+    pub celsius: Option<i16>,
 }
 
 impl Model {
@@ -165,6 +167,7 @@ impl Model {
             today: None,
             resume: Resume::Start,
             yes_count: 0,
+            celsius: None,
         }
     }
 

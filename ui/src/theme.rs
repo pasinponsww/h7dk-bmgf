@@ -43,6 +43,8 @@ pub const SHADOW_SOFT: Rgb565 = rgb(0xF7, 0xDD, 0xE5);
 /// from the dog's pure white fur, which 16-bit color would otherwise merge
 /// it with).
 pub const POLAROID: Rgb565 = rgb(0xFF, 0xFB, 0xF0);
+/// The dog's sweat drops on a hot board, sky blue `#8CCBEA`.
+pub const SWEAT: Rgb565 = rgb(0x8C, 0xCB, 0xEA);
 /// Quiet text: hints and buttons that do not work yet, `#8C858E`.
 pub const MUTED: Rgb565 = rgb(0x8C, 0x85, 0x8E);
 /// Text on an [`ICON`]-colored button: the background pink.

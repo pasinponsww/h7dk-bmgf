@@ -23,6 +23,7 @@ use crate::cordic::Cordic;
 use crate::flash::ExternalFlash;
 use crate::hyperram::HyperRamPort;
 use crate::storage::SaveSector;
+use crate::thermo::Thermometer;
 
 pub const LCD_WIDTH: usize = 480;
 pub const LCD_HEIGHT: usize = 272;
@@ -50,6 +51,8 @@ pub struct Board {
     pub save: SaveSector,
     /// The CORDIC co-processor, for sine and cosine.
     pub cordic: Cordic,
+    /// The chip's temperature sensor.
+    pub thermometer: Thermometer,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -115,6 +118,12 @@ impl Board {
             .pll3_r_ck(PIXEL_CLOCK_HZ.Hz())
             .freeze(power, &dp.SYSCFG);
         start_pll3();
+        // The ADCs' kernel clock from per_ck (HSI, 64 MHz): PLL2, their
+        // default, is not used. Set before any peripheral is taken out.
+        let mut clocks = clocks;
+        clocks
+            .peripheral
+            .kernel_adc_clk_mux(stm32h7xx_hal::rcc::rec::AdcClkSel::Per);
         step("clocks ok; gpio ports");
         let gpioa = dp.GPIOA.split(clocks.peripheral.GPIOA);
         let gpiob = dp.GPIOB.split(clocks.peripheral.GPIOB);
@@ -236,6 +245,7 @@ impl Board {
             clock,
             save: SaveSector::new(dp.FLASH),
             cordic: Cordic::new(dp.CORDIC, clocks.peripheral.CORDIC),
+            thermometer: Thermometer::new(dp.ADC3, clocks.peripheral.ADC3, &clocks.clocks),
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,
