@@ -31,6 +31,8 @@ geometry = { path = "crates/geometry" }
 rng = { path = "crates/rng" }
 ui = { path = "ui" }
 embedded-graphics = { version = "0.8", default-features = false }
+aes = { version = "0.8", default-features = false }
+ctr = { version = "0.9", default-features = false }
 bsp = { path = "crates/bsp", optional = true }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"], optional = true }
 cortex-m-rt = { version = "0.7", optional = true }
@@ -44,6 +46,8 @@ rtic-monotonics = { version = "2", features = ["cortex-m-systick"], optional = t
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 resvg = { version = "0.45", default-features = false }
 fontdue = "0.9"
+aes = { version = "0.8", default-features = false }
+ctr = { version = "0.9", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [lints]

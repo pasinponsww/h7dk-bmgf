@@ -18,6 +18,7 @@ use stm32h7xx_hal::rng::RngExt;
 use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
+use crate::aes::Aes;
 use crate::clock::Clock;
 use crate::cordic::Cordic;
 use crate::flash::ExternalFlash;
@@ -53,6 +54,8 @@ pub struct Board {
     pub cordic: Cordic,
     /// The chip's temperature sensor.
     pub thermometer: Thermometer,
+    /// The AES engine.
+    pub aes: Aes,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -246,6 +249,7 @@ impl Board {
             save: SaveSector::new(dp.FLASH),
             cordic: Cordic::new(dp.CORDIC, clocks.peripheral.CORDIC),
             thermometer: Thermometer::new(dp.ADC3, clocks.peripheral.ADC3, &clocks.clocks),
+            aes: Aes::new(dp.CRYP, clocks.peripheral.CRYPT),
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

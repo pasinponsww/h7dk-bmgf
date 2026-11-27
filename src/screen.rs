@@ -207,6 +207,9 @@ fn dog_place(model: &Model) -> (GPoint, u32) {
 const SLIDE_MS: u32 = 4_000;
 /// Hearts that float up the celebration, slowly spinning.
 const SPINNERS: usize = 10;
+/// The secret message takes the message's place this long after the
+/// message has finished typing.
+const SECRET_AFTER_MS: u32 = 3_000;
 
 /// Draws whole frames. Holds the parts of a frame that are worked out once
 /// and then reused for every band.
@@ -221,6 +224,8 @@ pub struct Painter {
     album: Option<&'static [u8]>,
     /// `(sin, cos)` of each celebration heart's turn this frame.
     spin: [(i16, i16); SPINNERS],
+    /// The secret message, once it has been opened.
+    secret: Option<crate::secret::Opened>,
 }
 
 impl Default for Painter {
@@ -240,7 +245,13 @@ impl Painter {
             glyphs: [0; backdrop::CELLS],
             album: None,
             spin: [(0, 32_767); SPINNERS],
+            secret: None,
         }
+    }
+
+    /// Gives the painter the opened secret message, shown on the celebration.
+    pub fn set_secret(&mut self, secret: Option<crate::secret::Opened>) {
+        self.secret = secret;
     }
 
     /// A painter that shows `album` (photos one after another, as
@@ -782,23 +793,25 @@ impl Painter {
             y += 10;
         }
         // The message types itself out once the title has had a moment.
+        // A while after it is done, the secret message (opened only now
+        // that she has said yes) takes its place, in rose.
+        let message_at = WIPE_MS + MESSAGE_DELAY_MS;
+        let secret_at =
+            message_at + TYPE_MS * to_u32(ENDING.message.en.chars().count()) + SECRET_AFTER_MS;
+        let secret = self.secret.as_ref().filter(|_| self.since() >= secret_at);
+        let (text, start, color) = match secret {
+            Some(s) => (s.as_str(), secret_at, theme::HEART),
+            None => (ENDING.message.en, message_at, theme::ICON),
+        };
         let typing = Typing {
-            shown: self
-                .since()
-                .checked_sub(WIPE_MS + MESSAGE_DELAY_MS)
-                .map_or(0, typed),
+            shown: self.since().checked_sub(start).map_or(0, typed),
             font: &VT323,
             scale: 1,
-            color: theme::ICON,
+            color,
             step: 22,
             t_ms: self.t_ms,
         };
-        typing.draw(
-            target,
-            wrap(ENDING.message.en, 32).take(3),
-            Align::Center(center),
-            y,
-        )?;
+        typing.draw(target, wrap(text, 32).take(3), Align::Center(center), y)?;
 
         // Every yes after the first is counted.
         if self.model.yes_count > 1 {
@@ -2069,6 +2082,44 @@ mod tests {
         m.celsius = Some(75);
         assert!(sweat(&m) > 40, "drops of sweat");
         assert_eq!(mood(&m, t), Mood::Happy, "panting, tongue out");
+    }
+
+    #[test]
+    fn the_secret_takes_the_message_place_after_a_while() {
+        use crate::secret::{open, SoftAes};
+        use crate::story::SECRET;
+        let sealed = SECRET.expect("the default story has a secret");
+        let opened = open(&sealed, &mut SoftAes).expect("it opens");
+        assert!(!opened.as_str().is_empty());
+
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let rose_text = |p: &mut Painter, t: u32| {
+            p.prepare(&r.m, &Cues::new(), r.m.now_ms + t);
+            let f = full_frame(p);
+            let raw = theme::to_raw(theme::HEART);
+            // The message rows in the right column only (hearts float there
+            // too, so compare with and without the secret).
+            (96..170)
+                .flat_map(|y| (210..470).map(move |x| y * WIDTH + x))
+                .filter(|&i| f[i] == raw)
+                .count()
+        };
+        let late = 20_000;
+        let mut plain = Painter::new();
+        let mut with = Painter::new();
+        with.set_secret(Some(opened));
+        assert_eq!(
+            rose_text(&mut plain, 1_500),
+            rose_text(&mut with, 1_500),
+            "not yet"
+        );
+        assert!(
+            rose_text(&mut with, late) > rose_text(&mut plain, late) + 50,
+            "the secret is up, in rose"
+        );
     }
 
     #[test]

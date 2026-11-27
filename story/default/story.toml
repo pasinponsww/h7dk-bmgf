@@ -61,3 +61,6 @@ prompt = "Draw a heart for me"
 [celebration]
 title = "You said yes"
 message = "best day ever"
+# Sealed with AES when the firmware is built; it only opens once she has
+# said yes. Up to 90 characters.
+secret = "I love you more than all the pixels on this screen"

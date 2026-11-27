@@ -40,6 +40,8 @@ prompt = "Draw a heart for me"   # up to 40 characters
 [celebration]                # the whole table is optional
 title = "You said yes"
 message = "best day ever"
+secret = "up to 90 characters"   # optional: sealed with AES, only opened after
+                                 # YES, then shown instead of the message
 zh = "optional"
 pinyin = "optional, together with zh"
 ```

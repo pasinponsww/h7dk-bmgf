@@ -6,6 +6,7 @@ pub mod gesture;
 pub mod liveness;
 pub mod pacing;
 pub mod save;
+pub mod secret;
 pub mod state;
 pub mod story;
 #[cfg(test)]

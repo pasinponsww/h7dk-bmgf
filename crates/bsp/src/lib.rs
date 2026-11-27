@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod aes;
 pub mod board;
 pub mod cache;
 pub mod clock;

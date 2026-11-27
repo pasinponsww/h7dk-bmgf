@@ -118,6 +118,53 @@ fn ending_code(doc: &toml::Table) -> String {
     )
 }
 
+/// The most bytes a secret may have (as in the app's `secret.rs`).
+const MAX_SECRET: usize = 90;
+
+/// FNV-1a over `bytes`, as 64 bits.
+fn fnv64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// `[celebration] secret`, sealed: "LOVE" and the text encrypted with
+/// AES-128 in counter mode (see the app's `secret.rs`). The key and the
+/// first counter block come from the text itself, so a build is the same
+/// every time; the last 32 bits of the counter start at zero, as the chip's
+/// AES engine counts them.
+fn secret_code(doc: &toml::Table) -> String {
+    use aes::cipher::{KeyIvInit, StreamCipher};
+    let empty = toml::Table::new();
+    let celebration = section(doc, "celebration").unwrap_or(&empty);
+    let Some(text) = limited(celebration, "secret", MAX_SECRET, "[celebration]") else {
+        return "/// No secret message.\npub static SECRET: Option<crate::secret::Sealed> = None;\n"
+            .to_string();
+    };
+    if text.len() > MAX_SECRET {
+        fail(&format!(
+            "[celebration]: \"secret\" is {} bytes, the limit is {MAX_SECRET}",
+            text.len()
+        ));
+    }
+    let mut key = [0u8; 16];
+    let mut iv = [0u8; 16];
+    for (i, chunk) in key.chunks_mut(8).enumerate() {
+        let h = fnv64(format!("key{i}:{text}").as_bytes());
+        chunk.copy_from_slice(&h.to_le_bytes());
+    }
+    let h = fnv64(format!("iv:{text}").as_bytes());
+    iv[..8].copy_from_slice(&h.to_le_bytes());
+    iv[8..12].copy_from_slice(&h.to_be_bytes()[..4]);
+    let mut bytes = b"LOVE".to_vec();
+    bytes.extend_from_slice(text.as_bytes());
+    let mut c = ctr::Ctr32BE::<aes::Aes128>::new(&key.into(), &iv.into());
+    c.apply_keystream(&mut bytes);
+    format!(
+        "/// The secret message, sealed.\npub static SECRET: Option<crate::secret::Sealed> = Some(crate::secret::Sealed {{ key: {key:?}, iv: {iv:?}, bytes: &{bytes:?} }});\n"
+    )
+}
+
 /// The optional `[trace]` table: the trace-a-heart game before the question.
 fn trace_code(doc: &toml::Table) -> String {
     let empty = toml::Table::new();
@@ -622,6 +669,7 @@ fn write_story_table(root: &Path, out: &Path) {
     code.push_str(&photos);
     code.push_str(&ending_code(&doc));
     code.push_str(&trace_code(&doc));
+    code.push_str(&secret_code(&doc));
 
     fs::write(out.join("chapters.rs"), code).expect("could not write chapters.rs");
     write_clock(&doc, out);

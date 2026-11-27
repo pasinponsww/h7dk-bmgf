@@ -142,6 +142,28 @@ impl ui::trig::Trig for HwTrig<'_> {
     }
 }
 
+/// AES from the chip's CRYP engine, for opening the secret message.
+struct HwAes<'a>(&'a mut bsp::aes::Aes);
+
+impl app::secret::Cipher for HwAes<'_> {
+    fn ctr(&mut self, key: &[u8; 16], iv: &[u8; 16], data: &mut [u8]) {
+        self.0.ctr(key, iv, data);
+    }
+}
+
+/// Opens the story's secret message with the AES engine, or in software if
+/// the engine's answer does not check out.
+fn open_secret(aes: &mut bsp::aes::Aes) -> Option<app::secret::Opened> {
+    use app::secret::{open, SoftAes};
+    let sealed = app::story::SECRET?;
+    if let Some(opened) = open(&sealed, &mut HwAes(aes)) {
+        defmt::info!("secret: opened with the AES engine");
+        return Some(opened);
+    }
+    defmt::warn!("secret: the AES engine's answer did not check out, opening in software");
+    open(&sealed, &mut SoftAes)
+}
+
 /// The clock's moment in the app's calendar types.
 fn moment_of(t: bsp::clock::Moment) -> app::calendar::DateTime {
     app::calendar::DateTime {
@@ -239,9 +261,9 @@ mod firmware {
     use ui::frame::Band;
 
     use super::{
-        load_album, log_scene, moment_of, next_tap, now_ms, save_progress, wait_for_top_blank,
-        HwTrig, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS,
-        LONG_PRESS_MS, SCAN, TICK_MS,
+        load_album, log_scene, moment_of, next_tap, now_ms, open_secret, save_progress,
+        wait_for_top_blank, HwTrig, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS,
+        FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
     };
 
     #[shared]
@@ -253,6 +275,7 @@ mod firmware {
     #[local]
     struct Local {
         thermometer: bsp::thermo::Thermometer,
+        aes: bsp::aes::Aes,
         painter: Painter,
         cordic: bsp::cordic::Cordic,
         save: bsp::storage::SaveSector,
@@ -298,6 +321,7 @@ mod firmware {
             save,
             cordic,
             thermometer,
+            aes,
             reset_by_watchdog,
             core_clock_hz,
             seed,
@@ -372,6 +396,7 @@ mod firmware {
             },
             Local {
                 thermometer,
+                aes,
                 cordic,
                 save,
                 saved: found,
@@ -565,11 +590,13 @@ mod firmware {
         display,
         painter,
         cordic,
+        aes,
         stats,
         max_wait,
         band: [u16; BAND_LEN] = [0; BAND_LEN],
         first: bool = true,
         in_step: bool = true,
+        secret_opened: bool = false,
     ])]
     async fn render(mut cx: render::Context) {
         loop {
@@ -583,6 +610,11 @@ mod firmware {
             let model = cx.shared.model.lock(|m| *m);
             let cues = cx.shared.cues.lock(|c| *c);
             let painter = &mut *cx.local.painter;
+            // She said yes: open the secret message with the AES engine.
+            if model.scene == app::Scene::Celebration && !*cx.local.secret_opened {
+                *cx.local.secret_opened = true;
+                painter.set_secret(open_secret(cx.local.aes));
+            }
             painter.prepare_with(&model, &cues, started, &mut HwTrig(cx.local.cordic));
 
             let band = &mut cx.local.band[..];
