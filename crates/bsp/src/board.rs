@@ -19,6 +19,7 @@ use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
 use crate::clock::Clock;
+use crate::cordic::Cordic;
 use crate::flash::ExternalFlash;
 use crate::hyperram::HyperRamPort;
 use crate::storage::SaveSector;
@@ -47,6 +48,8 @@ pub struct Board {
     pub clock: Clock,
     /// The flash sector that keeps saved progress.
     pub save: SaveSector,
+    /// The CORDIC co-processor, for sine and cosine.
+    pub cordic: Cordic,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -232,6 +235,7 @@ impl Board {
             hyperram,
             clock,
             save: SaveSector::new(dp.FLASH),
+            cordic: Cordic::new(dp.CORDIC, clocks.peripheral.CORDIC),
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

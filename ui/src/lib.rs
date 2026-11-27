@@ -11,3 +11,4 @@ pub mod mascot;
 pub mod photo;
 pub mod sticker;
 pub mod theme;
+pub mod trig;

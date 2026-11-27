@@ -56,6 +56,15 @@ pub fn spans(center: Point, size: i32, y: i32) -> [Option<(i32, i32)>; 2] {
     [Some((cx - w, cx + w)), None]
 }
 
+/// True if `(x, y)`, measured from the heart's center, is inside a heart of
+/// `size`.
+pub fn contains(size: i32, x: i32, y: i32) -> bool {
+    spans(Point::new(0, 0), size, y)
+        .into_iter()
+        .flatten()
+        .any(|(a, b)| (a..=b).contains(&x))
+}
+
 /// The size a heart centered on `center` needs to cover a `width` by
 /// `height` screen completely.
 pub fn covering_size(center: Point, width: i32, height: i32) -> i32 {

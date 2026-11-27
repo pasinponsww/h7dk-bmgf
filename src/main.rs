@@ -133,6 +133,15 @@ fn save_progress(
     };
 }
 
+/// Sine and cosine from the CORDIC co-processor, for the painter.
+struct HwTrig<'a>(&'a mut bsp::cordic::Cordic);
+
+impl ui::trig::Trig for HwTrig<'_> {
+    fn sin_cos(&mut self, angle: u16) -> (i16, i16) {
+        self.0.sin_cos(angle)
+    }
+}
+
 /// The clock's moment in the app's calendar types.
 fn moment_of(t: bsp::clock::Moment) -> app::calendar::DateTime {
     app::calendar::DateTime {
@@ -231,7 +240,7 @@ mod firmware {
 
     use super::{
         load_album, log_scene, moment_of, next_tap, now_ms, save_progress, wait_for_top_blank,
-        Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS,
+        HwTrig, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS,
         LONG_PRESS_MS, SCAN, TICK_MS,
     };
 
@@ -244,6 +253,7 @@ mod firmware {
     #[local]
     struct Local {
         painter: Painter,
+        cordic: bsp::cordic::Cordic,
         save: bsp::storage::SaveSector,
         saved: app::save::Found,
         clock: bsp::clock::Clock,
@@ -285,6 +295,7 @@ mod firmware {
             hyperram,
             mut clock,
             save,
+            cordic,
             reset_by_watchdog,
             core_clock_hz,
             seed,
@@ -358,6 +369,7 @@ mod firmware {
                 cues: Cues::new(),
             },
             Local {
+                cordic,
                 save,
                 saved: found,
                 clock,
@@ -536,6 +548,7 @@ mod firmware {
     #[task(priority = 1, shared = [model, cues], local = [
         display,
         painter,
+        cordic,
         stats,
         max_wait,
         band: [u16; BAND_LEN] = [0; BAND_LEN],
@@ -554,7 +567,7 @@ mod firmware {
             let model = cx.shared.model.lock(|m| *m);
             let cues = cx.shared.cues.lock(|c| *c);
             let painter = &mut *cx.local.painter;
-            painter.prepare(&model, &cues, started);
+            painter.prepare_with(&model, &cues, started, &mut HwTrig(cx.local.cordic));
 
             let band = &mut cx.local.band[..];
             let max_wait = *cx.local.max_wait;

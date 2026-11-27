@@ -18,11 +18,12 @@ use embedded_graphics::primitives::{
     Triangle,
 };
 use embedded_graphics::text::{Baseline, Text};
-use embedded_graphics::Drawable;
+use embedded_graphics::{Drawable, Pixel};
 use ui::frame::Scaled;
 use ui::icon::{Icon, Tones};
 use ui::mascot::{self, Mood};
 use ui::photo::Photo;
+use ui::trig::{rotate, SoftTrig, Trig};
 use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
@@ -201,6 +202,8 @@ fn dog_place(model: &Model) -> (GPoint, u32) {
 
 /// Each photo of the album slideshow stays this long.
 const SLIDE_MS: u32 = 4_000;
+/// Hearts that float up the celebration, slowly spinning.
+const SPINNERS: usize = 10;
 
 /// Draws whole frames. Holds the parts of a frame that are worked out once
 /// and then reused for every band.
@@ -213,6 +216,8 @@ pub struct Painter {
     /// The album's photos, one after another (see `crate::album`), if one
     /// was loaded.
     album: Option<&'static [u8]>,
+    /// `(sin, cos)` of each celebration heart's turn this frame.
+    spin: [(i16, i16); SPINNERS],
 }
 
 impl Default for Painter {
@@ -231,6 +236,7 @@ impl Painter {
             dog: [mascot::CLEAR; mascot::CELLS],
             glyphs: [0; backdrop::CELLS],
             album: None,
+            spin: [(0, 32_767); SPINNERS],
         }
     }
 
@@ -250,8 +256,28 @@ impl Painter {
         Some(Photo::new(to_u16(crate::album::SIDE), px))
     }
 
-    /// Works out the frame for `model` at `t_ms` milliseconds since boot.
+    /// Works out the frame for `model` at `t_ms` milliseconds since boot,
+    /// with sine and cosine done in software.
     pub fn prepare(&mut self, model: &Model, cues: &Cues, t_ms: u32) {
+        self.prepare_with(model, cues, t_ms, &mut SoftTrig);
+    }
+
+    /// [`Painter::prepare`], with sine and cosine from `trig` (the board's
+    /// CORDIC co-processor).
+    pub fn prepare_with(&mut self, model: &Model, cues: &Cues, t_ms: u32, trig: &mut dyn Trig) {
+        // Each celebration heart turns at its own pace, some one way, some
+        // the other.
+        for (k, s) in (0u32..).zip(self.spin.iter_mut()) {
+            let h = hash(k.wrapping_mul(0x9e37_79b9) ^ 0x51);
+            let speed = 6 + h % 14;
+            let turn = t_ms.wrapping_mul(speed).wrapping_add(h);
+            let turn = if h & 1 == 0 {
+                turn
+            } else {
+                turn.wrapping_neg()
+            };
+            *s = trig.sin_cos(u16::try_from(turn & 0xffff).unwrap_or(0));
+        }
         self.model = *model;
         self.cues = *cues;
         self.t_ms = t_ms;
@@ -722,19 +748,20 @@ impl Painter {
             }
         }
 
-        // Hearts float up the right side, each at its own pace.
-        for k in 0..14u32 {
+        // Hearts float up the right side, each at its own pace, spinning.
+        for (k, &spin) in (0u32..).zip(self.spin.iter()) {
             let h = hash(k.wrapping_mul(0x9e37_79b9) ^ 0x51);
-            let period = 2_600 + h % 2_400;
+            let period = 3_200 + h % 2_800;
             let phase = (self.t_ms.wrapping_add(h)) % period;
-            let x = RIGHT_COLUMN_X + to_i32_u(h / 7 % 260);
-            let y = 272 - to_i32_u(phase * 300 / period);
+            let x = RIGHT_COLUMN_X + 10 + to_i32_u(h / 7 % 250);
+            let y = 290 - to_i32_u(phase * 330 / period);
+            let size = 7 + to_i32_u(h / 13 % 7);
             let color = if k % 3 == 0 {
                 theme::TILE
             } else {
                 theme::HEART
             };
-            heart(target, GPoint::new(x, y), 3, color)?;
+            spinning_heart(target, GPoint::new(x, y), size, spin, color)?;
         }
 
         let center = (RIGHT_COLUMN_X + i32::from(SCREEN_W)) / 2;
@@ -1108,6 +1135,40 @@ where
     RoundedRectangle::with_equal_corners(area, Size::new(radius, radius))
         .into_styled(PrimitiveStyle::with_stroke(color, width))
         .draw(target)
+}
+
+/// A heart of `size` turned by the angle whose `(sin, cos)` is `spin`,
+/// centered on `center`. Each pixel nearby is turned back by the same angle
+/// and drawn if it lands inside the upright heart.
+fn spinning_heart<D>(
+    target: &mut D,
+    center: GPoint,
+    size: i32,
+    spin: (i16, i16),
+    color: Rgb565,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    // The heart reaches 1.05 of its size from its center, whichever way up.
+    let r = size * 11 / 10 + 1;
+    let side = to_u32_i(2 * r + 1);
+    let area = Rectangle::new(center - GPoint::new(r, r), Size::new(side, side));
+    if !visible(target, &area) {
+        return Ok(());
+    }
+    let clip = target.bounding_box();
+    let top = (center.y - r).max(clip.top_left.y);
+    let bottom = (center.y + r + 1).min(clip.top_left.y + to_i32_u(clip.size.height));
+    let back = (-spin.0, spin.1);
+    for y in top..bottom {
+        let row = (center.x - r..=center.x + r).filter_map(|x| {
+            let (u, v) = rotate(x - center.x, y - center.y, back);
+            heart_shape::contains(size, u, v).then_some(Pixel(GPoint::new(x, y), color))
+        });
+        target.draw_iter(row)?;
+    }
+    Ok(())
 }
 
 /// The dog's little heart, each art pixel drawn `scale` pixels wide.
@@ -1909,6 +1970,48 @@ mod tests {
         );
         let before = Date::new(since.year - 1, 1, 1).unwrap();
         assert!(together_line(Some(before)).is_none(), "not yet together");
+    }
+
+    #[test]
+    fn celebration_hearts_spin_as_they_float() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let t = r.m.now_ms + WIPE_MS + 500;
+        let mut p = Painter::new();
+        p.prepare(&r.m, &Cues::new(), t);
+        let a = p.spin;
+        let hearts = count(&full_frame(&p), theme::HEART);
+        p.prepare(&r.m, &Cues::new(), t + 40);
+        assert_ne!(a, p.spin, "they turn");
+        assert!(hearts > 200, "and show: {hearts} rose pixels");
+    }
+
+    #[test]
+    fn a_turned_heart_keeps_its_size() {
+        let mut buf = std::vec![0u16; WIDTH * HEIGHT];
+        let raw = theme::to_raw(theme::HEART);
+        let mut area = |spin| {
+            buf.fill(0);
+            spinning_heart(
+                &mut Band::new(&mut buf, 0),
+                GPoint::new(100, 100),
+                20,
+                spin,
+                theme::HEART,
+            )
+            .unwrap();
+            buf.iter().filter(|&&p| p == raw).count()
+        };
+        let upright = area(SoftTrig.sin_cos(0));
+        let tilted = area(SoftTrig.sin_cos(5_000));
+        let upside_down = area(SoftTrig.sin_cos(32_768));
+        assert!(upright > 400, "{upright}");
+        for turned in [tilted, upside_down] {
+            let diff = upright.abs_diff(turned);
+            assert!(diff * 10 < upright, "{upright} vs {turned}");
+        }
     }
 
     #[test]

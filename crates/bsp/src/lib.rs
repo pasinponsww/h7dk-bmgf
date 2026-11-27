@@ -3,6 +3,7 @@
 pub mod board;
 pub mod cache;
 pub mod clock;
+pub mod cordic;
 pub mod flash;
 pub mod hyperram;
 pub mod storage;
