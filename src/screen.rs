@@ -21,7 +21,7 @@ use embedded_graphics::Drawable;
 use ui::frame::Scaled;
 use ui::icon::{Icon, Tones};
 use ui::mascot::{self, Mood};
-use ui::{backdrop, theme};
+use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
 use crate::state::{Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W};
@@ -36,10 +36,12 @@ const NUDGE_MS: u32 = 900;
 const POP_MS: u32 = 300;
 /// Text that types itself out shows one more character this often.
 const TYPE_MS: u32 = 28;
-/// The celebration message starts typing this long after the title appears.
-const MESSAGE_DELAY_MS: u32 = 700;
+/// The celebration message starts typing this long after the heart wipe ends.
+const MESSAGE_DELAY_MS: u32 = 300;
 /// How long the intro takes to fade in from the background pink.
 pub const FADE_MS: u32 = 450;
+/// How long the heart wipe takes to open a new scene.
+pub const WIPE_MS: u32 = 700;
 
 /// How much of the picture shows, from 0 (only the background pink) to 255,
 /// for the LCD controller's layer fade. The intro fades in: at power-on and
@@ -212,7 +214,34 @@ impl Painter {
         }
         let (at, scale) = dog_place(self.model.scene);
         self.draw_dog(target, at, scale)?;
-        self.ripple(target)
+        self.ripple(target)?;
+        if let Some((center, size)) = self.wipe() {
+            heart_shape::fill_outside(target, center, size, theme::TILE)?;
+        }
+        Ok(())
+    }
+
+    /// While a scene going forward opens, the heart it shows through: its
+    /// center and size. The heart grows from where the tap that opened the
+    /// scene landed (or the middle of the screen), slowly at first and then
+    /// quickly, until it covers the whole screen.
+    fn wipe(&self) -> Option<(GPoint, i32)> {
+        if self.model.scene == Scene::Intro {
+            return None;
+        }
+        let since = self.since();
+        if since >= WIPE_MS {
+            return None;
+        }
+        let center = match self.cues.ripple {
+            Some((p, at)) if at == self.model.scene_start_ms => {
+                GPoint::new(i32::from(p.x), i32::from(p.y))
+            }
+            _ => GPoint::new(i32::from(SCREEN_W) / 2, 136),
+        };
+        let full = heart_shape::covering_size(center, i32::from(SCREEN_W), 272);
+        let p = to_i32_u(since * 1_000 / WIPE_MS);
+        Some((center, full * p * p / 1_000_000))
     }
 
     fn draw_backdrop<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -472,9 +501,9 @@ impl Painter {
     where
         D: DrawTarget<Color = Rgb565>,
     {
-        // The question types itself out as the scene opens.
+        // The question types itself out once the heart wipe has opened.
         let typing = Typing {
-            shown: typed(self.since()),
+            shown: self.since().checked_sub(WIPE_MS).map_or(0, typed),
             font: &FONT_10X20,
             color: theme::TEXT,
             step: 24,
@@ -536,7 +565,10 @@ impl Painter {
         }
         // The message types itself out once the title has had a moment.
         let typing = Typing {
-            shown: self.since().checked_sub(MESSAGE_DELAY_MS).map_or(0, typed),
+            shown: self
+                .since()
+                .checked_sub(WIPE_MS + MESSAGE_DELAY_MS)
+                .map_or(0, typed),
             font: &FONT_10X20,
             color: theme::ICON,
             step: 24,
@@ -1100,7 +1132,7 @@ mod tests {
     fn every_scene_draws_the_dog_on_the_pink_background() {
         let mut p = Painter::new();
         for (m, cues) in scenes() {
-            for t in [0, 250, 1_000, 5_000] {
+            for t in [WIPE_MS, 1_000, 2_500, 5_000] {
                 p.prepare(&m, &cues, m.now_ms + t);
                 let f = full_frame(&p);
                 assert!(count(&f, theme::BACKGROUND) > f.len() / 3, "{:?}", m.scene);
@@ -1136,10 +1168,11 @@ mod tests {
         r.tap(1, 1);
         let mut p = Painter::new();
         let center = (NEXT_BUTTON.x as usize + 50) + (NEXT_BUTTON.y as usize + 4) * WIDTH;
-        p.prepare(&r.m, &Cues::new(), r.m.now_ms);
+        let opened = r.m.now_ms + WIPE_MS;
+        p.prepare(&r.m, &Cues::new(), opened);
         assert_eq!(full_frame(&p)[center], theme::to_raw(theme::MAUVE));
         r.m.skip_ok = true;
-        p.prepare(&r.m, &Cues::new(), r.m.now_ms);
+        p.prepare(&r.m, &Cues::new(), opened);
         assert_eq!(full_frame(&p)[center], theme::to_raw(theme::ICON));
     }
 
@@ -1211,6 +1244,32 @@ mod tests {
     }
 
     #[test]
+    fn a_new_chapter_opens_through_a_growing_heart() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let start = r.m.now_ms;
+        let mut p = Painter::new();
+        let mut wipe_pixels = |t: u32| {
+            p.prepare(&r.m, &Cues::new(), start + t);
+            count(&full_frame(&p), theme::TILE)
+        };
+        let at_start = wipe_pixels(0);
+        let half_way = wipe_pixels(WIPE_MS / 2);
+        let done = wipe_pixels(WIPE_MS);
+        assert_eq!(at_start, WIDTH * HEIGHT, "nothing shows at first");
+        assert!(half_way < at_start && half_way > done, "{half_way}");
+        assert!(done < WIDTH * HEIGHT / 10, "the wipe is gone: {done}");
+    }
+
+    #[test]
+    fn the_intro_has_no_wipe() {
+        let m = Model::new(0);
+        let mut p = Painter::new();
+        p.prepare(&m, &Cues::new(), 10);
+        assert!(p.wipe().is_none());
+    }
+
+    #[test]
     fn text_types_itself_out_one_character_at_a_time() {
         assert_eq!(typed(0), 0);
         assert_eq!(typed(TYPE_MS - 1), 0);
@@ -1229,7 +1288,7 @@ mod tests {
     fn the_question_appears_letter_by_letter() {
         let mut r = Rig::new();
         r.play_to_question();
-        let start = r.m.now_ms;
+        let start = r.m.now_ms + WIPE_MS;
         let mut p = Painter::new();
         // Only the question's own rows, left of the dog (whose outline is
         // the text color too).
