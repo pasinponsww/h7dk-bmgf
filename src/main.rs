@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 
 use defmt_rtt as _;
 use panic_probe as _;
@@ -64,23 +64,28 @@ fn log_scene(model: &Model) {
 /// whether to feed the watchdog (see `app::liveness`).
 static FRAMES: AtomicU32 = AtomicU32::new(0);
 
+/// The LED duty the tick task wants, green in the high byte and red in the
+/// low byte. The LED interrupt reads it 10 000 times a second.
+static LED_LEVELS: AtomicU16 = AtomicU16::new(0);
+
 fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
+    use app::leds::Dither;
     use app::liveness::Liveness;
     use app::screen::{Cues, Painter};
     use app::story::Content;
     use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
-    use bsp::{Board, Button, Display, Leds, Touch, Watchdog};
+    use bsp::{Board, Button, Display, LedTimer, Leds, Touch, Watchdog};
     use rtic_monotonics::systick::prelude::*;
     use ui::frame::Band;
 
     use super::{
         log_scene, next_tap, now_ms, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_MS,
-        LONG_PRESS_MS, TICK_MS,
+        LED_LEVELS, LONG_PRESS_MS, TICK_MS,
     };
 
     #[shared]
@@ -92,6 +97,7 @@ mod firmware {
     #[local]
     struct Local {
         leds: Leds,
+        led_timer: LedTimer,
         button: Button,
         touch: Touch,
         display: Display,
@@ -115,6 +121,7 @@ mod firmware {
 
         let Board {
             leds,
+            led_timer,
             button,
             display,
             touch,
@@ -143,6 +150,7 @@ mod firmware {
             },
             Local {
                 leds,
+                led_timer,
                 button,
                 touch,
                 display,
@@ -159,7 +167,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [leds, button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching])]
+    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -236,8 +244,19 @@ mod firmware {
                 defmt::info!("chapter complete");
             }
             cx.shared.cues.lock(|c| c.record(&fx, now));
-            cx.local.leds.set(fx.leds.0, fx.leds.1);
+            let (green, red) = fx.leds;
+            LED_LEVELS.store(u16::from(green) << 8 | u16::from(red), Ordering::Relaxed);
         }
+    }
+
+    /// Dims the LEDs: 10 000 times a second, switches each one on or off so
+    /// that over time it is on for its share (see `app::leds::Dither`).
+    #[task(binds = TIM2, priority = 3, local = [leds, led_timer, dither: Dither = Dither::new()])]
+    fn led_pwm(cx: led_pwm::Context) {
+        cx.local.led_timer.ack();
+        let [green, red] = LED_LEVELS.load(Ordering::Relaxed).to_be_bytes();
+        let (g, r) = cx.local.dither.step((green, red));
+        cx.local.leds.set(g, r);
     }
 
     /// Folds the one-shot cues of `f` into `all`.

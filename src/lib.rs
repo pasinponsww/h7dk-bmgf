@@ -10,4 +10,4 @@ pub use common::story::Story;
 pub use common::{event, liveness, state, story};
 pub use geometry::{Point, Rect};
 pub use rng::{Rng, XorShift32};
-pub use task::update;
+pub use task::{leds, update};

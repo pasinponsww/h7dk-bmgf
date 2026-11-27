@@ -168,9 +168,9 @@ mod tests {
         let fx = r.tap_rect(CH0[1]);
         assert_eq!(fx.reveal, Some(1));
         assert_eq!(story_state(&r.m), (0, 0b10, Some(1)));
-        assert_eq!(fx.leds, (true, true), "both LEDs flash on a hit");
+        assert_eq!(fx.leds, (255, 255), "both LEDs flash on a hit");
         let later = r.tick(FLASH_MS + 1);
-        assert!(!(later.leds.0 && later.leds.1), "the flash ends");
+        assert_ne!(later.leds, (255, 255), "the flash ends");
     }
 
     #[test]

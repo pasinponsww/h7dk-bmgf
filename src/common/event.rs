@@ -36,8 +36,8 @@ pub enum TouchEvent {
 pub struct Effects {
     /// The screen content changed and should be drawn again.
     pub redraw: bool,
-    /// Desired LED state: `(green, red)`.
-    pub leds: (bool, bool),
+    /// Desired LED duty, `(green, red)`, from 0 (off) to 255 (always on).
+    pub leds: (u8, u8),
     /// Draw a touch ripple here.
     pub ripple: Option<Point>,
     /// A hotspot was tapped: show its line and play its pop animation.

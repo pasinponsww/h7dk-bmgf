@@ -15,6 +15,7 @@ use stm32h7xx_hal::independent_watchdog::IndependentWatchdog;
 use stm32h7xx_hal::ltdc::{Ltdc, LtdcLayer1};
 use stm32h7xx_hal::rcc::{PllConfigStrategy, ResetReason};
 use stm32h7xx_hal::rng::RngExt;
+use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
 pub const LCD_WIDTH: usize = 480;
@@ -23,6 +24,8 @@ pub const LCD_PIXELS: usize = LCD_WIDTH * LCD_HEIGHT;
 
 pub struct Board {
     pub leds: Leds,
+    /// Ticks at [`LED_PWM_HZ`] to switch the LEDs on and off for dimming.
+    pub led_timer: LedTimer,
     pub button: Button,
     pub display: Display,
     pub touch: Touch,
@@ -128,6 +131,11 @@ impl Board {
         step("leds and button");
         // LED and Button initialization
         let leds = Leds::new(gpioc.pc3, gpioc.pc2);
+        let led_timer = LedTimer::new(dp.TIM2.timer(
+            LED_PWM_HZ.Hz(),
+            clocks.peripheral.TIM2,
+            &clocks.clocks,
+        ));
         let button = Button::new(gpioc.pc13);
 
         step("touch controller (I2C4)");
@@ -151,6 +159,7 @@ impl Board {
         step("board ready");
         Self {
             leds,
+            led_timer,
             button,
             display,
             touch,
@@ -564,6 +573,25 @@ impl Leds {
         } else {
             self.red.set_high();
         }
+    }
+}
+
+/// How often the LED timer interrupt (TIM2) fires. The LED pins have no
+/// hardware PWM, so dimming is done by switching them on every tick.
+pub const LED_PWM_HZ: u32 = 10_000;
+
+/// TIM2, set up to raise its interrupt [`LED_PWM_HZ`] times a second.
+pub struct LedTimer(Timer<pac::TIM2>);
+
+impl LedTimer {
+    fn new(mut timer: Timer<pac::TIM2>) -> Self {
+        timer.listen(TimerEvent::TimeOut);
+        Self(timer)
+    }
+
+    /// Clears the interrupt. Call it first thing in the TIM2 handler.
+    pub fn ack(&mut self) {
+        self.0.clear_irq();
     }
 }
 
