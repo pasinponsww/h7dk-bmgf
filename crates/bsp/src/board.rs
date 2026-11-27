@@ -13,6 +13,7 @@ use stm32h7xx_hal::hal::blocking::i2c::{Write, WriteRead};
 use stm32h7xx_hal::i2c::{self, I2c};
 use stm32h7xx_hal::ltdc::{Ltdc, LtdcLayer1};
 use stm32h7xx_hal::rcc::PllConfigStrategy;
+use stm32h7xx_hal::rng::RngExt;
 use stm32h7xx_hal::{pac, prelude::*};
 
 pub const LCD_WIDTH: usize = 480;
@@ -25,6 +26,9 @@ pub struct Board {
     pub display: Display,
     pub touch: Touch,
     pub core_clock_hz: u32,
+    /// 32 truly random bits from the chip's hardware random number generator,
+    /// different on every start-up. Seed the app's random numbers with it.
+    pub seed: u32,
 }
 
 impl Board {
@@ -124,6 +128,9 @@ impl Board {
         );
         let touch = Touch::new(i2c);
 
+        step("random seed (RNG)");
+        let seed = random_seed(dp.RNG, clocks.peripheral.RNG, &clocks.clocks);
+
         step("board ready");
         Self {
             leds,
@@ -131,8 +138,32 @@ impl Board {
             display,
             touch,
             core_clock_hz: clocks.clocks.c_ck().raw(),
+            seed,
         }
     }
+}
+
+/// Used if the hardware random number generator reports an error.
+const FALLBACK_SEED: u32 = 0xA5A5_1234;
+
+/// Reads 32 random bits from the RNG peripheral, then switches it off again.
+/// The RNG runs from HSI48, which the HAL always switches on.
+fn random_seed(
+    rng: pac::RNG,
+    prec: stm32h7xx_hal::rcc::rec::Rng,
+    clocks: &stm32h7xx_hal::rcc::CoreClocks,
+) -> u32 {
+    let mut rng = rng.constrain(prec, clocks);
+    let seed = match rng.value() {
+        Ok(v) => v,
+        Err(_) => {
+            defmt::warn!("rng: no random number, using the fixed seed");
+            FALLBACK_SEED
+        }
+    };
+    rng.release().cr.modify(|_, w| w.rngen().disabled());
+    defmt::info!("rng: seed {=u32:#010x}", seed);
+    seed
 }
 
 /// Switches PLL3 on, which makes the LCD pixel clock.

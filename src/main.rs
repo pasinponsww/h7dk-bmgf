@@ -109,6 +109,7 @@ mod firmware {
             display,
             touch,
             core_clock_hz,
+            seed,
         } = Board::init(cx.device);
         defmt::info!("core clock {} Hz", core_clock_hz);
 
@@ -130,7 +131,9 @@ mod firmware {
                 button,
                 touch,
                 display,
-                rng: XorShift32::new(0xA5A5_1234),
+                // A new seed from the hardware RNG on every start-up, so the
+                // NO button runs a different way each time.
+                rng: XorShift32::new(seed),
                 pressed_since: None,
                 long_press_done: false,
                 was_touching: false,
