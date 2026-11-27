@@ -34,6 +34,10 @@ const RIPPLE_MS: u32 = 450;
 const NUDGE_MS: u32 = 900;
 /// How long a tapped object pops.
 const POP_MS: u32 = 300;
+/// Text that types itself out shows one more character this often.
+const TYPE_MS: u32 = 28;
+/// The celebration message starts typing this long after the title appears.
+const MESSAGE_DELAY_MS: u32 = 700;
 /// Text of the intro screen.
 const INTRO_TITLE: &str = "For you";
 /// Label of the intro button.
@@ -314,11 +318,25 @@ impl Painter {
         let top = i32::from(CARD.y) + CARD_PAD_TOP;
         match shown.and_then(|i| page.hotspots.get(usize::from(i))) {
             Some(h) => {
+                // The line types itself out from the moment the object is tapped.
+                let shown_chars = match (shown, self.cues.reveal) {
+                    (Some(i), Some((j, start))) if i == j => typed(self.t_ms.wrapping_sub(start)),
+                    _ => usize::MAX,
+                };
                 let (font, width, lines, step) = card_font(h.line);
-                for (k, line) in wrap(h.line, width).take(lines).enumerate() {
-                    let at = GPoint::new(left, top + to_i32(k) * step);
-                    text(target, line, at, font, theme::TEXT)?;
-                }
+                let typing = Typing {
+                    shown: shown_chars,
+                    font,
+                    color: theme::TEXT,
+                    step,
+                    t_ms: self.t_ms,
+                };
+                typing.draw(
+                    target,
+                    wrap(h.line, width).take(lines),
+                    Align::Left(left),
+                    top,
+                )?;
             }
             None => {
                 let left_to_find = n - (found & full_mask(n)).count_ones() as usize;
@@ -435,11 +453,20 @@ impl Painter {
     where
         D: DrawTarget<Color = Rgb565>,
     {
-        let mut y = 20;
-        for line in wrap(ENDING.question.en, 36).take(3) {
-            text(target, line, GPoint::new(16, y), &FONT_10X20, theme::TEXT)?;
-            y += 24;
-        }
+        // The question types itself out as the scene opens.
+        let typing = Typing {
+            shown: typed(self.since()),
+            font: &FONT_10X20,
+            color: theme::TEXT,
+            step: 24,
+            t_ms: self.t_ms,
+        };
+        typing.draw(
+            target,
+            wrap(ENDING.question.en, 36).take(3),
+            Align::Left(16),
+            20,
+        )?;
 
         let no = self.model.no_rect;
         let label_index = usize::from(self.model.dodges.min(MAX_DODGES));
@@ -488,10 +515,20 @@ impl Painter {
             }
             y += 8;
         }
-        for line in wrap(ENDING.message.en, 26).take(3) {
-            text_centered(target, line, center, y, &FONT_10X20, theme::ICON)?;
-            y += 24;
-        }
+        // The message types itself out once the title has had a moment.
+        let typing = Typing {
+            shown: self.since().checked_sub(MESSAGE_DELAY_MS).map_or(0, typed),
+            font: &FONT_10X20,
+            color: theme::ICON,
+            step: 24,
+            t_ms: self.t_ms,
+        };
+        typing.draw(
+            target,
+            wrap(ENDING.message.en, 26).take(3),
+            Align::Center(center),
+            y,
+        )?;
 
         pill_shadow(target, RESTART_BUTTON)?;
         pill(
@@ -815,6 +852,79 @@ where
     text_centered(target, s, cx, cy - h / 2, font, color)
 }
 
+/// How many characters of a text that started typing `age_ms` ago are showing.
+fn typed(age_ms: u32) -> usize {
+    usize::try_from(age_ms / TYPE_MS).unwrap_or(usize::MAX)
+}
+
+/// The first `n` characters of `s`.
+fn first_chars(s: &str, n: usize) -> &str {
+    s.char_indices().nth(n).map_or(s, |(i, _)| &s[..i])
+}
+
+/// Where the lines of a text go across the screen.
+#[derive(Copy, Clone)]
+enum Align {
+    /// Every line starts at this x.
+    Left(i32),
+    /// Every line is centered on this x.
+    Center(i32),
+}
+
+/// Text that types itself out: only the first `shown` characters are drawn,
+/// with a blinking cursor after the last one until the whole text is out.
+struct Typing<'f> {
+    shown: usize,
+    font: &'f MonoFont<'f>,
+    color: Rgb565,
+    /// Distance from one line's top to the next.
+    step: i32,
+    /// The frame's time, for the cursor's blink.
+    t_ms: u32,
+}
+
+impl Typing<'_> {
+    /// Draws `lines`, the first one's top at `top`. A centered line is placed
+    /// by its full width, so it does not slide while it types.
+    fn draw<'s, D>(
+        &self,
+        target: &mut D,
+        lines: impl Iterator<Item = &'s str>,
+        align: Align,
+        top: i32,
+    ) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let mut left = self.shown;
+        for (k, line) in lines.enumerate() {
+            let y = top + to_i32(k) * self.step;
+            let x = match align {
+                Align::Left(x) => x,
+                Align::Center(cx) => cx - text_width(line, self.font) / 2,
+            };
+            let count = line.chars().count();
+            let part = first_chars(line, left);
+            text(target, part, GPoint::new(x, y), self.font, self.color)?;
+            if left <= count {
+                // Still typing: a blinking block where the next letter goes.
+                if (self.t_ms / 250).is_multiple_of(2) {
+                    let cell = self.font.character_size;
+                    let at = GPoint::new(x + text_width(part, self.font), y + 1);
+                    let block = Rectangle::new(at, Size::new(cell.width / 2 + 1, cell.height - 2));
+                    if visible(target, &block) {
+                        target.fill_solid(&block, theme::ICON)?;
+                    }
+                }
+                return Ok(());
+            }
+            // The space the line break took counts as one character.
+            left -= count + 1;
+        }
+        Ok(())
+    }
+}
+
 /// Splits `s` into lines of at most `width` characters, breaking at spaces
 /// where it can.
 pub fn wrap(s: &str, width: usize) -> Wrap<'_> {
@@ -1063,6 +1173,45 @@ mod tests {
             7,
         );
         assert_eq!((c.nudge, c.reveal), (None, None));
+    }
+
+    #[test]
+    fn text_types_itself_out_one_character_at_a_time() {
+        assert_eq!(typed(0), 0);
+        assert_eq!(typed(TYPE_MS - 1), 0);
+        assert_eq!(typed(TYPE_MS * 5), 5);
+        assert_eq!(first_chars("hello", 0), "");
+        assert_eq!(first_chars("hello", 2), "he");
+        assert_eq!(first_chars("hello", 99), "hello");
+        assert_eq!(
+            first_chars("héllo", 2),
+            "hé",
+            "counts characters, not bytes"
+        );
+    }
+
+    #[test]
+    fn the_question_appears_letter_by_letter() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let start = r.m.now_ms;
+        let mut p = Painter::new();
+        // Only the question's own rows, left of the dog (whose outline is
+        // the text color too).
+        let mut text_at = |t: u32| {
+            p.prepare(&r.m, &Cues::new(), start + t);
+            let f = full_frame(&p);
+            let raw = theme::to_raw(theme::TEXT);
+            (18..96)
+                .flat_map(|y| (0..380).map(move |x| y * WIDTH + x))
+                .filter(|&i| f[i] == raw)
+                .count()
+        };
+        let early = text_at(TYPE_MS * 3);
+        let later = text_at(TYPE_MS * 12);
+        let done = text_at(TYPE_MS * 200);
+        assert!(early < later && later < done, "{early} < {later} < {done}");
+        assert_eq!(done, text_at(TYPE_MS * 400), "finished text stays put");
     }
 
     #[test]
