@@ -62,6 +62,12 @@ pub fn sample(scene: Scene, t_ms: u32) -> (u8, u8) {
         Scene::Intro => (breathe(t_ms, 3_000, FULL), 0),
         // A calm red heartbeat while reading the story.
         Scene::Story { .. } => (0, heartbeat(t_ms, 1_200)),
+        // Drawing the heart: the beat speeds up with every dot traced, over
+        // a soft green glow.
+        Scene::Trace { hit } => {
+            let dots = (hit & crate::trace::ALL).count_ones();
+            (breathe(t_ms, 2_000, 90), heartbeat(t_ms, 1_100 - dots * 25))
+        }
         // The heart races at the big question.
         Scene::Question => (0, heartbeat(t_ms, 650)),
         // Both at once: a happy heartbeat over a quick green breath.

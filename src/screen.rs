@@ -14,7 +14,8 @@ use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::{DrawTarget, Point as GPoint, Primitive, Size};
 use embedded_graphics::primitives::{
-    Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Triangle,
+    Circle, Line as Segment, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
+    Triangle,
 };
 use embedded_graphics::text::{Baseline, Text};
 use embedded_graphics::Drawable;
@@ -27,7 +28,8 @@ use crate::event::Effects;
 use crate::state::{
     dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W,
 };
-use crate::story::{full_mask, Content, CHAPTERS, ENDING};
+use crate::story::{full_mask, Content, CHAPTERS, ENDING, TRACE};
+use crate::trace::{self, DOTS, DOT_AT};
 use crate::{Point, Rect};
 
 /// How long a touch ripple grows, in milliseconds.
@@ -150,6 +152,9 @@ fn mood(model: &Model, t_ms: u32) -> Mood {
             .get(usize::from(chapter))
             .and_then(|c| Mood::from_name(c.mood))
             .unwrap_or(Mood::Idle),
+        // Watching her draw, then in love once the heart is done.
+        Scene::Trace { .. } if model.traced_ms.is_some() => Mood::Love,
+        Scene::Trace { .. } => Mood::Wow,
         Scene::Question if model.no_gave_up() => Mood::Love,
         Scene::Question if model.dodges > 0 => Mood::Wow,
         Scene::Question => Mood::Shy,
@@ -222,6 +227,7 @@ impl Painter {
                 found,
                 shown,
             } => self.story(target, chapter, found, shown)?,
+            Scene::Trace { hit } => self.trace(target, hit)?,
             Scene::Question => self.question(target)?,
             Scene::Celebration => self.celebration(target)?,
         }
@@ -510,6 +516,76 @@ impl Painter {
         } else {
             big_text_centered(target, "?", cx, cy - 20, theme::ICON, 2)
         }
+    }
+
+    /// The dotted heart she traces. Traced dots turn rose and join up into
+    /// the heart's outline; the next dot to trace pulses after a while; once
+    /// it is done the whole outline glows and "Perfect!" pops up inside.
+    fn trace<D>(&self, target: &mut D, hit: u32) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let done = self.model.traced_for(self.t_ms);
+        let center_x = (i32::from(DOT_AT[6].0) + i32::from(DOT_AT[18].0)) / 2;
+        text_centered(target, TRACE.prompt, center_x, 20, &FONT_10X20, theme::TEXT)?;
+        let traced = (hit & trace::ALL).count_ones();
+        let mut count = Line::new();
+        let _ = write!(count, "{traced} / {DOTS}");
+        text_centered(
+            target,
+            count.as_str(),
+            center_x,
+            46,
+            &FONT_7X13,
+            theme::MUTED,
+        )?;
+
+        let dot = |i: usize| GPoint::new(i32::from(DOT_AT[i].0), i32::from(DOT_AT[i].1));
+        let is_hit = |i: usize| hit & 1 << i != 0;
+        let width = if done.is_some() { 7 } else { 5 };
+        let line = PrimitiveStyle::with_stroke(theme::HEART, width);
+        for i in 0..DOTS {
+            let j = (i + 1) % DOTS;
+            if done.is_some() || (is_hit(i) && is_hit(j)) {
+                Segment::new(dot(i), dot(j))
+                    .into_styled(line)
+                    .draw(target)?;
+            }
+        }
+        for i in 0..DOTS {
+            let (d, style) = if is_hit(i) || done.is_some() {
+                (12, PrimitiveStyle::with_fill(theme::HEART))
+            } else {
+                (10, PrimitiveStyle::with_stroke(theme::ICON, 2))
+            };
+            let at = dot(i) - GPoint::new(to_i32_u(d) / 2, to_i32_u(d) / 2);
+            Circle::new(at, d).into_styled(style).draw(target)?;
+        }
+
+        // The hint: the next dot to trace pulses.
+        if let Some((i, start)) = self.cues.nudge {
+            if let Some(age) = running(start, self.t_ms, NUDGE_MS) {
+                if done.is_none() && !is_hit(usize::from(i)) {
+                    let d = 18 + to_u32_i(to_i32_u(age / 150 % 2) * 8);
+                    let p =
+                        dot(usize::from(i) % DOTS) - GPoint::new(to_i32_u(d) / 2, to_i32_u(d) / 2);
+                    Circle::new(p, d)
+                        .into_styled(PrimitiveStyle::with_stroke(theme::ICON, 3))
+                        .draw(target)?;
+                }
+            }
+        }
+
+        if let Some(age) = done {
+            // "Perfect!" grows into place inside the finished heart.
+            let scale = if age < 150 { 1 } else { 2 };
+            big_text_centered(target, "Perfect!", center_x, 128, theme::ICON, scale)?;
+        } else if self.model.next_unlocked(&Content) {
+            shadow(target, NEXT_BUTTON, 12)?;
+            rounded(target, NEXT_BUTTON, 12, theme::ICON, None)?;
+            label(target, NEXT_BUTTON, "Next >", theme::ON_ICON)?;
+        }
+        Ok(())
     }
 
     fn question<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -1173,34 +1249,61 @@ mod tests {
         let mut m = Model::new(0);
         let mut cues = Cues::new();
         let mut out = vec![(m, cues)];
-        let mut tap = |m: &mut Model, cues: &mut Cues, x: i16, y: i16| {
-            let fx = update(
-                m,
-                &story,
-                &mut rng,
-                Event::Touch(TouchEvent::Down(Point::new(x, y))),
-            );
+        let mut send = |m: &mut Model, cues: &mut Cues, ev: Event| {
+            let fx = update(m, &story, &mut rng, ev);
             cues.record(&fx, m.now_ms);
         };
-        tap(&mut m, &mut cues, 240, 136);
+        let tap =
+            |send: &mut dyn FnMut(&mut Model, &mut Cues, Event),
+             m: &mut Model,
+             cues: &mut Cues,
+             x: i16,
+             y: i16| send(m, cues, Event::Touch(TouchEvent::Down(Point::new(x, y))));
+        tap(&mut send, &mut m, &mut cues, 240, 136);
         out.push((m, cues));
         let r = story.hotspot_rect(0, 0);
-        tap(&mut m, &mut cues, r.x + 4, r.y + 4);
+        tap(&mut send, &mut m, &mut cues, r.x + 4, r.y + 4);
         out.push((m, cues));
         for ch in 0..story.chapter_count() {
             for i in 0..story.hotspot_count(ch) {
                 let r = story.hotspot_rect(ch, i);
-                tap(&mut m, &mut cues, r.x + 4, r.y + 4);
+                tap(&mut send, &mut m, &mut cues, r.x + 4, r.y + 4);
             }
-            tap(&mut m, &mut cues, NEXT_BUTTON.x + 4, NEXT_BUTTON.y + 4);
+            tap(
+                &mut send,
+                &mut m,
+                &mut cues,
+                NEXT_BUTTON.x + 4,
+                NEXT_BUTTON.y + 4,
+            );
         }
+        assert_eq!(
+            m.scene,
+            Scene::Trace { hit: 0 },
+            "the heart game comes first"
+        );
+        out.push((m, cues));
+        // Trace the heart: a tap on the first dot, then a drag round the rest.
+        let (x, y) = DOT_AT[0];
+        tap(&mut send, &mut m, &mut cues, x, y);
+        for i in 1..=DOTS {
+            let (x, y) = DOT_AT[i % DOTS];
+            send(
+                &mut m,
+                &mut cues,
+                Event::Touch(TouchEvent::Move(Point::new(x, y))),
+            );
+        }
+        out.push((m, cues));
+        let done = m.now_ms + crate::state::TRACE_ADMIRE_MS;
+        send(&mut m, &mut cues, Event::Tick { now_ms: done });
         assert_eq!(m.scene, Scene::Question);
         out.push((m, cues));
         let no = m.no_rect;
-        tap(&mut m, &mut cues, no.x + 4, no.y + 4);
+        tap(&mut send, &mut m, &mut cues, no.x + 4, no.y + 4);
         out.push((m, cues));
         let yes = m.yes_rect();
-        tap(&mut m, &mut cues, yes.x + 4, yes.y + 4);
+        tap(&mut send, &mut m, &mut cues, yes.x + 4, yes.y + 4);
         assert_eq!(m.scene, Scene::Celebration);
         out.push((m, cues));
         out

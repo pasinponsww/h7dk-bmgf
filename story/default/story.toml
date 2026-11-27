@@ -43,6 +43,12 @@ text = "Will you be my girlfriend?"
 yes = "YES"
 no_labels = ["No", "Wait, no", "Sure?", "Error 404", "Really?", "Okay, yes"]
 
+[trace]
+# Before the question she draws a heart over a dotted outline.
+# Set enabled = false to go straight to the question.
+enabled = true
+prompt = "Draw a heart for me"
+
 [celebration]
 title = "You said yes"
 message = "best day ever"

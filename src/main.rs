@@ -52,6 +52,14 @@ fn next_tap(model: &Model, story: &Content) -> Point {
                 .find(|i| found & (1u8 << i) == 0)
                 .map_or(center(NEXT_BUTTON), |i| center(story.hotspot_rect(ch, i)))
         }
+        // The next dot of the heart, or Next once it has unlocked.
+        Scene::Trace { hit } => match app::trace::first_missing(hit) {
+            Some(i) if !model.next_unlocked(story) => {
+                let (x, y) = app::trace::DOT_AT[usize::from(i)];
+                Point::new(x, y)
+            }
+            _ => center(NEXT_BUTTON),
+        },
         Scene::Question => center(model.yes_rect()),
         Scene::Celebration => center(RESTART_BUTTON),
     }
@@ -67,6 +75,10 @@ fn log_scene(model: &Model) {
                 found
             );
         }
+        Scene::Trace { hit } => defmt::info!(
+            "scene: trace the heart, {} dots",
+            (hit & app::trace::ALL).count_ones()
+        ),
         Scene::Question => defmt::info!("scene: question"),
         Scene::Celebration => defmt::info!("scene: celebration"),
     }
@@ -236,6 +248,8 @@ mod firmware {
             // A finger that just touched the glass is a tap.
             let finger = cx.local.touch.read();
             let finger_down = finger.is_some() && !*cx.local.was_touching;
+            // A finger that stays on the glass is moving (tracing the heart).
+            let finger_held = finger.is_some() && *cx.local.was_touching;
             *cx.local.was_touching = finger.is_some();
             // A quick sideways move before the finger lifts is a swipe.
             let swipe = cx
@@ -290,6 +304,11 @@ mod firmware {
                 if button_restart {
                     defmt::info!("button held -> back to the beginning");
                     fx = update(model, &story, rng, Event::Restart);
+                    merge(&mut all, &fx);
+                }
+                if let (true, Some(t)) = (finger_held, finger) {
+                    let at = Point::new(t.x, t.y);
+                    fx = update(model, &story, rng, Event::Touch(TouchEvent::Move(at)));
                     merge(&mut all, &fx);
                 }
                 if let Some(s) = swipe {

@@ -11,6 +11,7 @@ use crate::state::{
     NO_AREA, RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
+use crate::trace;
 
 /// Index of the first object not yet tapped.
 pub(crate) fn first_unfound(found: u8, n: usize) -> Option<u8> {
@@ -40,6 +41,20 @@ pub(crate) fn on_down<S: Story, R: Rng>(
             fx.redraw = true;
         }
         Scene::Story { chapter, found, .. } => story_touch(m, story, chapter, found, p, fx),
+        Scene::Trace { hit } => {
+            if m.skip_ok && m.traced_ms.is_none() && NEXT_BUTTON.contains(p) {
+                // Given up on drawing: straight on to the question.
+                m.go(Scene::Question);
+                fx.scene_changed = true;
+                fx.redraw = true;
+            } else if dog_rect(m.scene).contains(p) {
+                pet(m, fx);
+            } else {
+                // A new stroke: nothing joins it to where the last one ended.
+                m.pen = None;
+                trace_to(m, hit, p, fx);
+            }
+        }
         Scene::Question => question_touch(m, rng, p, fx),
         Scene::Celebration => {
             if RESTART_BUTTON.contains(p) {
@@ -48,6 +63,34 @@ pub(crate) fn on_down<S: Story, R: Rng>(
                 pet(m, fx);
             }
         }
+    }
+}
+
+/// The finger moved while down. Only tracing the heart cares.
+pub(crate) fn on_move(m: &mut Model, p: Point, fx: &mut Effects) {
+    if let Scene::Trace { hit } = m.scene {
+        m.last_touch_ms = m.now_ms;
+        trace_to(m, hit, p, fx);
+    }
+}
+
+/// Traces the dots the finger passed on its way to `p`, and finishes the
+/// heart once enough are traced.
+fn trace_to(m: &mut Model, hit: u32, p: Point, fx: &mut Effects) {
+    if m.traced_ms.is_some() {
+        return;
+    }
+    let now = trace::mark(hit, m.pen, p);
+    m.pen = Some(p);
+    if now == hit {
+        return;
+    }
+    m.scene = Scene::Trace { hit: now };
+    fx.redraw = true;
+    if trace::done(now) {
+        m.traced_ms = Some(m.now_ms);
+        m.flash_until_ms = m.now_ms.wrapping_add(FLASH_MS);
+        fx.chapter_complete = true;
     }
 }
 
@@ -118,7 +161,11 @@ fn turn_page<S: Story>(m: &mut Model, story: &S, ch: usize, found: u8, fx: &mut 
     }
     let next = ch + 1;
     if next >= story.chapter_count() {
-        m.go(Scene::Question);
+        m.go(if story.trace_heart() {
+            Scene::Trace { hit: 0 }
+        } else {
+            Scene::Question
+        });
     } else {
         m.go(Scene::Story {
             chapter: u8::try_from(next).unwrap_or(u8::MAX),
@@ -207,6 +254,8 @@ mod tests {
     use crate::state::{
         dog_rect, Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, PET_MS, RESTART_BUTTON,
     };
+    use crate::state::{NUDGE_AFTER_MS, TRACE_ADMIRE_MS, UNLOCK_AFTER_MS};
+    use crate::trace::{DOTS, DOT_AT};
     use crate::{update, Event};
     use geometry::Point;
 
@@ -425,6 +474,78 @@ mod tests {
         r.play_to_question();
         assert!(!swipe(&mut r, Swipe::Right).scene_changed);
         assert_eq!(r.m.scene, Scene::Question);
+    }
+
+    /// Traces the heart: a tap on the first dot, then a drag round the rest.
+    fn trace_heart(r: &mut Rig) {
+        let (x, y) = DOT_AT[0];
+        r.tap(x, y);
+        for i in 1..=DOTS {
+            let (x, y) = DOT_AT[i % DOTS];
+            r.drag(x, y);
+        }
+    }
+
+    #[test]
+    fn after_the_last_chapter_she_traces_a_heart_before_the_question() {
+        let mut r = Rig::with_trace();
+        r.play_to_question();
+        trace_heart(&mut r);
+        let Scene::Trace { hit } = r.m.scene else {
+            panic!("still tracing");
+        };
+        assert!(crate::trace::done(hit), "{hit:#b}");
+        assert_eq!(r.m.traced_for(r.m.now_ms), Some(0));
+        r.tick(TRACE_ADMIRE_MS - 1);
+        assert!(
+            matches!(r.m.scene, Scene::Trace { .. }),
+            "admiring the heart"
+        );
+        let fx = r.tick(TRACE_ADMIRE_MS);
+        assert!(fx.scene_changed);
+        assert_eq!(r.m.scene, Scene::Question);
+    }
+
+    #[test]
+    fn lifting_the_finger_starts_a_new_stroke() {
+        let mut r = Rig::with_trace();
+        r.play_to_question();
+        let (a, b) = (DOT_AT[0], DOT_AT[12]);
+        r.tap(a.0, a.1);
+        r.tap(b.0, b.1);
+        assert_eq!(
+            r.m.scene,
+            Scene::Trace { hit: 1 | 1 << 12 },
+            "no line across the middle"
+        );
+    }
+
+    #[test]
+    fn stuck_on_the_heart_gets_a_hint_then_a_way_on() {
+        let mut r = Rig::with_trace();
+        r.play_to_question();
+        assert_eq!(r.tick(NUDGE_AFTER_MS + 100).nudge, Some(0));
+        r.tap_next();
+        assert!(
+            matches!(r.m.scene, Scene::Trace { .. }),
+            "Next is not there yet"
+        );
+        // The tap on Next counted as a touch, so the wait starts from there.
+        r.tick(NUDGE_AFTER_MS + 100 + UNLOCK_AFTER_MS + 100);
+        assert!(r.m.next_unlocked(&Fake));
+        let fx = r.tap_next();
+        assert!(fx.scene_changed);
+        assert_eq!(r.m.scene, Scene::Question);
+    }
+
+    #[test]
+    fn a_drag_does_nothing_outside_the_heart_game() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let before = r.m.scene;
+        let fx = r.drag(CH0[0].x + 4, CH0[0].y + 4);
+        assert!(!fx.redraw);
+        assert_eq!(r.m.scene, before, "dragging over an object does not tap it");
     }
 
     #[test]

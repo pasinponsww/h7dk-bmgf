@@ -26,6 +26,7 @@ const DEFAULT_NO: [&str; NO_LABEL_COUNT] = [
     "Okay, yes",
 ];
 const DEFAULT_TITLE: &str = "You said yes";
+const DEFAULT_TRACE_PROMPT: &str = "Draw a heart for me";
 const DEFAULT_MESSAGE: &str = "best day ever";
 
 fn text<'a>(table: &'a toml::Table, key: &str) -> Option<&'a str> {
@@ -114,6 +115,22 @@ fn ending_code(doc: &toml::Table) -> String {
         .join(", ");
     format!(
         "/// The question screen and the ending.\npub static ENDING: Ending = Ending {{\n    question: Phrase {{ en: {text_q:?}, zh: {zh_q:?}, pinyin: {py_q:?} }},\n    yes: {yes:?},\n    no_labels: [{labels}],\n    title: {title:?},\n    message: Phrase {{ en: {message:?}, zh: {zh_c:?}, pinyin: {py_c:?} }},\n}};\n"
+    )
+}
+
+/// The optional `[trace]` table: the trace-a-heart game before the question.
+fn trace_code(doc: &toml::Table) -> String {
+    let empty = toml::Table::new();
+    let trace = section(doc, "trace").unwrap_or(&empty);
+    let enabled = trace.get("enabled").is_none_or(|v| {
+        v.as_bool()
+            .unwrap_or_else(|| fail("[trace]: \"enabled\" must be true or false"))
+    });
+    let prompt = limited(trace, "prompt", 40, "[trace]").unwrap_or(DEFAULT_TRACE_PROMPT);
+    format!(
+        "/// The trace-a-heart game before the question.
+pub static TRACE: Trace = Trace {{ enabled: {enabled}, prompt: {prompt:?} }};
+"
     )
 }
 
@@ -341,6 +358,7 @@ fn write_story_table(root: &Path, out: &Path) {
     }
     writeln!(code, "];\n").unwrap();
     code.push_str(&ending_code(&doc));
+    code.push_str(&trace_code(&doc));
 
     fs::write(out.join("chapters.rs"), code).expect("could not write chapters.rs");
 }

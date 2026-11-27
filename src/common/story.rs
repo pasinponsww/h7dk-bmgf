@@ -10,6 +10,11 @@ pub trait Story {
     fn hotspot_count(&self, chapter: usize) -> usize;
     /// Where an object sits on the screen.
     fn hotspot_rect(&self, chapter: usize, index: usize) -> Rect;
+    /// True if she draws a heart (see `crate::trace`) between the last
+    /// chapter and the question.
+    fn trace_heart(&self) -> bool {
+        false
+    }
 }
 
 /// Mask with one bit set for each of `n` objects.
@@ -76,6 +81,15 @@ pub struct Phrase {
     pub pinyin: &'static str,
 }
 
+/// The trace-a-heart game before the question.
+#[derive(Copy, Clone, Debug)]
+pub struct Trace {
+    /// False to go straight from the last chapter to the question.
+    pub enabled: bool,
+    /// What the screen asks her to do.
+    pub prompt: &'static str,
+}
+
 /// The question screen and the celebration after it.
 #[derive(Copy, Clone, Debug)]
 pub struct Ending {
@@ -129,6 +143,9 @@ impl Story for Content {
             .get(chapter)
             .and_then(|c| c.hotspots.get(index))
             .map_or(Rect::new(0, 0, 0, 0), |h| h.rect)
+    }
+    fn trace_heart(&self) -> bool {
+        TRACE.enabled
     }
 }
 
@@ -269,20 +286,40 @@ mod tests {
         let story = Content;
         let mut m = Model::new(0);
         let mut rng = XorShift32::new(99);
-        let mut tap = |m: &mut Model, p: Point| {
-            update(m, &story, &mut rng, Event::Touch(TouchEvent::Down(p)));
+        let mut send = |m: &mut Model, ev: Event| {
+            update(m, &story, &mut rng, ev);
         };
-        tap(&mut m, Point::new(10, 10));
+        let tap = |send: &mut dyn FnMut(&mut Model, Event), m: &mut Model, p: Point| {
+            send(m, Event::Touch(TouchEvent::Down(p)));
+        };
+        tap(&mut send, &mut m, Point::new(10, 10));
         for ch in 0..story.chapter_count() {
             for i in 0..story.hotspot_count(ch) {
                 let r = story.hotspot_rect(ch, i);
-                tap(&mut m, Point::new(r.x + 5, r.y + 5));
+                tap(&mut send, &mut m, Point::new(r.x + 5, r.y + 5));
             }
-            tap(&mut m, Point::new(NEXT_BUTTON.x + 5, NEXT_BUTTON.y + 5));
+            tap(
+                &mut send,
+                &mut m,
+                Point::new(NEXT_BUTTON.x + 5, NEXT_BUTTON.y + 5),
+            );
+        }
+        if story.trace_heart() {
+            // Draw the heart, then let it be admired.
+            let (x, y) = crate::trace::DOT_AT[0];
+            tap(&mut send, &mut m, Point::new(x, y));
+            for &(x, y) in crate::trace::DOT_AT
+                .iter()
+                .chain([&crate::trace::DOT_AT[0]])
+            {
+                send(&mut m, Event::Touch(TouchEvent::Move(Point::new(x, y))));
+            }
+            let now = m.now_ms + crate::state::TRACE_ADMIRE_MS;
+            send(&mut m, Event::Tick { now_ms: now });
         }
         assert_eq!(m.scene, Scene::Question);
         let yes = m.yes_rect();
-        tap(&mut m, Point::new(yes.x + 5, yes.y + 5));
+        tap(&mut send, &mut m, Point::new(yes.x + 5, yes.y + 5));
         assert_eq!(m.scene, Scene::Celebration);
     }
 }

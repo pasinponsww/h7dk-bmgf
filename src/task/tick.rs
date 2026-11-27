@@ -1,8 +1,11 @@
 //! The clock task: idle hints, the "Next" unlock, and the auto-restart.
 
 use crate::event::Effects;
-use crate::state::{Model, Scene, IDLE_RESET_MS, NUDGE_AFTER_MS, NUDGE_EVERY_MS, UNLOCK_AFTER_MS};
+use crate::state::{
+    Model, Scene, IDLE_RESET_MS, NUDGE_AFTER_MS, NUDGE_EVERY_MS, TRACE_ADMIRE_MS, UNLOCK_AFTER_MS,
+};
 use crate::story::{full_mask, Story};
+use crate::trace;
 
 use super::touch::first_unfound;
 
@@ -18,6 +21,25 @@ pub(crate) fn on_tick<S: Story>(m: &mut Model, story: &S, fx: &mut Effects) {
             {
                 m.last_nudge_ms = m.now_ms;
                 fx.nudge = first_unfound(found, n);
+            }
+            if idle > UNLOCK_AFTER_MS && !m.skip_ok {
+                m.skip_ok = true;
+                fx.redraw = true;
+            }
+        }
+        Scene::Trace { hit } => {
+            if let Some(admired) = m.traced_for(m.now_ms) {
+                // The finished heart has had its moment: on to the question.
+                if admired >= TRACE_ADMIRE_MS {
+                    m.go(Scene::Question);
+                    fx.scene_changed = true;
+                    fx.redraw = true;
+                }
+                return;
+            }
+            if idle > NUDGE_AFTER_MS && m.now_ms.wrapping_sub(m.last_nudge_ms) > NUDGE_EVERY_MS {
+                m.last_nudge_ms = m.now_ms;
+                fx.nudge = trace::first_missing(hit);
             }
             if idle > UNLOCK_AFTER_MS && !m.skip_ok {
                 m.skip_ok = true;

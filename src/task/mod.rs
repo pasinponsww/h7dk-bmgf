@@ -17,7 +17,8 @@ pub fn update<S: Story, R: Rng>(m: &mut Model, story: &S, rng: &mut R, ev: Event
             tick::on_tick(m, story, &mut fx);
         }
         Event::Touch(TouchEvent::Down(p)) => touch::on_down(m, story, rng, p, &mut fx),
-        Event::Touch(TouchEvent::Move(_) | TouchEvent::Up(_)) => {}
+        Event::Touch(TouchEvent::Move(p)) => touch::on_move(m, p, &mut fx),
+        Event::Touch(TouchEvent::Up(_)) => {}
         Event::Swipe(s) => touch::on_swipe(m, story, s, &mut fx),
         Event::Restart => touch::restart(m, &mut fx),
     }

@@ -2,7 +2,7 @@
 //! `Model` is an RTIC shared resource: every task reads and writes it, and RTIC
 //! makes sure two tasks never do so at the same time.
 
-use geometry::Rect;
+use geometry::{Point, Rect};
 
 use crate::story::{full_mask, Story};
 
@@ -45,6 +45,8 @@ pub const PET_MS: u32 = 1_800;
 /// After this long untouched on the intro, the dog starts playing to get
 /// attention.
 pub const ATTRACT_AFTER_MS: u32 = 30_000;
+/// A finished heart stays on screen this long before the question opens.
+pub const TRACE_ADMIRE_MS: u32 = 1_400;
 /// The dog sprite's size in sprite pixels (see `ui::mascot`).
 const DOG_W: i16 = 34;
 const DOG_H: i16 = 40;
@@ -55,6 +57,7 @@ pub const fn dog_spot(scene: Scene) -> (i16, i16, u8) {
     match scene {
         Scene::Intro => (40, 56, 4),
         Scene::Story { .. } => (74, 72, 3),
+        Scene::Trace { .. } => (28, 96, 3),
         Scene::Question => (396, 14, 2),
         Scene::Celebration => (36, 56, 4),
     }
@@ -81,6 +84,11 @@ pub enum Scene {
         /// The object whose line is currently shown.
         shown: Option<u8>,
     },
+    /// Draw a heart over a dotted outline, before the question.
+    Trace {
+        /// Bitmask of the dots traced so far (see `crate::trace`).
+        hit: u32,
+    },
     /// "Will you be my girlfriend?"
     Question,
     /// The happy ending.
@@ -106,6 +114,10 @@ pub struct Model {
     pub(crate) flash_until_ms: u32,
     /// When the dog was last petted, while it is still happy about it.
     pub(crate) petted_ms: Option<u32>,
+    /// Where the finger was at the last reading while tracing, if it is down.
+    pub(crate) pen: Option<Point>,
+    /// When the heart was finished.
+    pub(crate) traced_ms: Option<u32>,
 }
 
 impl Model {
@@ -122,6 +134,8 @@ impl Model {
             last_nudge_ms: now_ms,
             flash_until_ms: 0,
             petted_ms: None,
+            pen: None,
+            traced_ms: None,
         }
     }
 
@@ -134,6 +148,8 @@ impl Model {
         self.skip_ok = false;
         self.flash_until_ms = 0;
         self.petted_ms = None;
+        self.pen = None;
+        self.traced_ms = None;
         if scene == Scene::Question {
             self.dodges = 0;
             self.no_rect = INITIAL_NO;
@@ -150,6 +166,11 @@ impl Model {
     pub fn petted_for(&self, now_ms: u32) -> Option<u32> {
         let since = now_ms.wrapping_sub(self.petted_ms?);
         (since < PET_MS).then_some(since)
+    }
+
+    /// Milliseconds since the heart was finished, if it has been.
+    pub fn traced_for(&self, now_ms: u32) -> Option<u32> {
+        Some(now_ms.wrapping_sub(self.traced_ms?))
     }
 
     /// Milliseconds the dog has been playing for attention at `now_ms`: the
@@ -175,6 +196,7 @@ impl Model {
             Scene::Story { chapter, found, .. } => {
                 self.skip_ok || found == full_mask(story.hotspot_count(usize::from(chapter)))
             }
+            Scene::Trace { .. } => self.skip_ok,
             _ => false,
         }
     }
