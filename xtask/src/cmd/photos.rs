@@ -3,7 +3,8 @@
 //!
 //! The album format is the one in the app's `src/common/album.rs`: a 64-byte
 //! "H7ALBUM1" header, then 128 x 128 RGB565 photos, low byte first. Each
-//! photo is cut to a centered square, shrunk and Floyd-Steinberg dithered,
+//! photo is cut to a square (nearer the top of a tall photo), shrunk and
+//! Floyd-Steinberg dithered,
 //! exactly as `build.rs` does for photos baked into the firmware.
 //!
 //! probe-rs cannot write the external flash (it has no flash algorithm for
@@ -71,11 +72,13 @@ pub fn dither_rgb565(img: &RgbImage) -> Vec<u16> {
     out
 }
 
-/// `img` cut to a centered square and shrunk to `SIDE` x `SIDE`.
+/// `img` cut to a square and shrunk to `SIDE` x `SIDE`: the middle of a wide
+/// photo, nearer the top of a tall one, where faces usually are (as
+/// `build.rs` does).
 pub fn square(img: &RgbImage) -> RgbImage {
     let side = img.width().min(img.height());
     let x = (img.width() - side) / 2;
-    let y = (img.height() - side) / 2;
+    let y = (img.height() - side) / 5;
     let cut = imageops::crop_imm(img, x, y, side, side).to_image();
     imageops::resize(&cut, SIDE, SIDE, FilterType::Lanczos3)
 }

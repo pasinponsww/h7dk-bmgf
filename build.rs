@@ -569,7 +569,8 @@ fn dither_rgb565(rgb: &[[u8; 3]], w: usize, h: usize) -> Vec<u16> {
 }
 
 /// Bakes the photo `file` (in the story folder) into `out/photos/<ident>.bin`:
-/// cut to a centered square, shrunk to [`PHOTO_PX`] and dithered to RGB565,
+/// cut to a square (the middle of a wide photo, nearer the top of a tall
+/// one), shrunk to [`PHOTO_PX`] and dithered to RGB565,
 /// low byte first. Returns the Rust static that holds it.
 fn bake_photo(story_dir: &Path, out: &Path, file: &str, label: &str, ident: &str) -> String {
     bake_photo_at(story_dir, out, file, label, ident, PHOTO_PX)
@@ -595,9 +596,11 @@ fn bake_photo_at(
         })
         .to_rgb8();
     let (w, h) = img.dimensions();
+    // A wide photo keeps its middle; a tall one keeps nearer its top, where
+    // faces usually are (a fifth of the spare height above, not half).
     let crop = w.min(h);
     let square =
-        image::imageops::crop_imm(&img, (w - crop) / 2, (h - crop) / 2, crop, crop).to_image();
+        image::imageops::crop_imm(&img, (w - crop) / 2, (h - crop) / 5, crop, crop).to_image();
     let small = image::imageops::resize(&square, side, side, image::imageops::FilterType::Lanczos3);
     let rgb: Vec<[u8; 3]> = small.pixels().map(|p| p.0).collect();
     let px = dither_rgb565(&rgb, side as usize, side as usize);
