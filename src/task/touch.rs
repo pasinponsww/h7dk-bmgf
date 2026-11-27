@@ -7,8 +7,8 @@ use rng::Rng;
 use crate::event::Effects;
 use crate::gesture::Swipe;
 use crate::state::{
-    dog_rect, Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
-    NO_AREA, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
+    Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON, NO_AREA,
+    PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 use crate::trace;
@@ -30,7 +30,7 @@ pub(crate) fn on_down<S: Story, R: Rng>(
     m.last_touch_ms = m.now_ms;
     fx.ripple = Some(p);
     match m.scene {
-        Scene::Intro if dog_rect(m.scene).contains(p) => pet(m, fx),
+        Scene::Intro if m.dog_rect().contains(p) => pet(m, fx),
         Scene::Intro => {
             m.go(Scene::Story {
                 chapter: 0,
@@ -47,7 +47,7 @@ pub(crate) fn on_down<S: Story, R: Rng>(
                 m.go(Scene::Question);
                 fx.scene_changed = true;
                 fx.redraw = true;
-            } else if dog_rect(m.scene).contains(p) {
+            } else if m.dog_rect().contains(p) {
                 pet(m, fx);
             } else {
                 // A new stroke: nothing joins it to where the last one ended.
@@ -59,7 +59,7 @@ pub(crate) fn on_down<S: Story, R: Rng>(
         Scene::Celebration => {
             if RESTART_BUTTON.contains(p) {
                 restart(m, fx);
-            } else if dog_rect(m.scene).contains(p) {
+            } else if m.dog_rect().contains(p) {
                 pet(m, fx);
             }
         }
@@ -161,7 +161,7 @@ fn story_touch<S: Story>(
         return;
     }
 
-    if dog_rect(m.scene).contains(p) {
+    if m.dog_rect().contains(p) {
         pet(m, fx);
     }
     // Anything else is a miss: the ripple is the only feedback.
@@ -230,7 +230,7 @@ fn question_touch<R: Rng>(m: &mut Model, rng: &mut R, p: Point, fx: &mut Effects
         return;
     }
     // Petting the dog in the corner is not a try at NO.
-    if dog_rect(m.scene).contains(p) {
+    if m.dog_rect().contains(p) {
         pet(m, fx);
         return;
     }

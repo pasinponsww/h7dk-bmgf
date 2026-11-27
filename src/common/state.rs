@@ -68,10 +68,17 @@ pub const fn dog_spot(scene: Scene) -> (i16, i16, u8) {
 
 /// The part of the screen the dog covers in a scene: tapping it pets the dog.
 pub const fn dog_rect(scene: Scene) -> Rect {
-    let (x, y, scale) = dog_spot(scene);
+    spot_rect(dog_spot(scene))
+}
+
+const fn spot_rect((x, y, scale): (i16, i16, u8)) -> Rect {
     let s = scale as i16;
     Rect::new(x, y, DOG_W * s, DOG_H * s)
 }
+
+/// Where the album slideshow's polaroid sits on the celebration, in the
+/// dog's usual place; the dog sits smaller at its corner.
+pub const SLIDESHOW_CARD: Rect = Rect::new(24, 26, 144, 172);
 
 /// The screen the user is on.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -123,6 +130,9 @@ pub struct Model {
     pub(crate) traced_ms: Option<u32>,
     /// When the chapter's polaroid came out, while it is showing.
     pub(crate) photo_ms: Option<u32>,
+    /// Photos in the album loaded from the external flash (0 for none). The
+    /// celebration shows them as a slideshow.
+    pub album: u16,
 }
 
 impl Model {
@@ -142,6 +152,7 @@ impl Model {
             pen: None,
             traced_ms: None,
             photo_ms: None,
+            album: 0,
         }
     }
 
@@ -173,6 +184,21 @@ impl Model {
     pub fn petted_for(&self, now_ms: u32) -> Option<u32> {
         let since = now_ms.wrapping_sub(self.petted_ms?);
         (since < PET_MS).then_some(since)
+    }
+
+    /// Where the dog sits right now: as [`dog_spot`] says, except on a
+    /// celebration with a slideshow, where it sits smaller at the corner of
+    /// the polaroid.
+    pub const fn dog_spot(&self) -> (i16, i16, u8) {
+        match self.scene {
+            Scene::Celebration if self.album > 0 => (150, 160, 2),
+            scene => dog_spot(scene),
+        }
+    }
+
+    /// The part of the screen the dog covers right now.
+    pub const fn dog_rect(&self) -> Rect {
+        spot_rect(self.dog_spot())
     }
 
     /// Milliseconds since the chapter's polaroid came out, while it shows.

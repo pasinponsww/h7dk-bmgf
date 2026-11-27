@@ -19,6 +19,7 @@ use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
 use crate::flash::ExternalFlash;
+use crate::hyperram::HyperRamPort;
 
 pub const LCD_WIDTH: usize = 480;
 pub const LCD_HEIGHT: usize = 272;
@@ -38,6 +39,8 @@ pub struct Board {
     pub watchdog: Watchdog,
     /// The 64 MB flash on OCTOSPI1, for reading the photo album.
     pub flash: ExternalFlash,
+    /// The 16 MB HyperRAM on OCTOSPI2, off until it is started.
+    pub hyperram: HyperRamPort,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -181,6 +184,22 @@ impl Board {
             None => defmt::warn!("flash: no answer"),
         }
 
+        step("hyperram pins (OCTOSPI2), started later if needed");
+        // As in the HAL's octospi_hyperram example for this board.
+        macro_rules! hyperram_pins {
+            ($af:literal: $($pin:expr),+ $(,)?) => {
+                $( let _ = $pin.into_alternate::<$af>().speed(Speed::High).internal_pull_up(true); )+
+            };
+        }
+        hyperram_pins!(9: gpiof.pf12, gpiof.pf4, gpiof.pf0, gpiof.pf1, gpiof.pf2, gpiof.pf3);
+        hyperram_pins!(9: gpiog.pg0, gpiog.pg1, gpiog.pg11);
+        hyperram_pins!(3: gpiog.pg12, gpiog.pg10);
+        let hyperram = HyperRamPort {
+            ospi: dp.OCTOSPI2,
+            rec: clocks.peripheral.OCTOSPI2,
+            clocks: clocks.clocks,
+        };
+
         step("random seed (RNG)");
         let seed = random_seed(dp.RNG, clocks.peripheral.RNG, &clocks.clocks);
 
@@ -196,6 +215,7 @@ impl Board {
             touch,
             watchdog,
             flash,
+            hyperram,
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

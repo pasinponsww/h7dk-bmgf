@@ -99,6 +99,52 @@ fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
+/// Reads the photo album off the external flash into the HyperRAM, if the
+/// flash has one and the HyperRAM works. Returns the photos, one after
+/// another, and how many there are. The HyperRAM is only switched on when
+/// there is an album to put in it.
+fn load_album(
+    flash: &mut bsp::flash::ExternalFlash,
+    hyperram: bsp::hyperram::HyperRamPort,
+    watchdog: &mut bsp::Watchdog,
+) -> Option<(&'static [u8], u16)> {
+    use app::album::{Album, HEADER_BYTES, PHOTO_BYTES};
+    let mut header = [0u8; HEADER_BYTES as usize];
+    let found = flash
+        .read(0, &mut header)
+        .ok()
+        .and_then(|()| Album::parse(&header));
+    let Some(album) = found else {
+        defmt::info!("album: none on the flash");
+        return None;
+    };
+    defmt::info!("album: {} photos on the flash", album.count);
+    let Some(ram) = hyperram.start() else {
+        defmt::warn!("hyperram: failed its check, no slideshow");
+        return None;
+    };
+    defmt::info!("hyperram: 16 MB ok");
+    let bytes = usize::try_from(album.bytes()).ok()?;
+    let photo = PHOTO_BYTES as usize;
+    let started = now_ms();
+    for (i, slot) in ram[..bytes].chunks_mut(photo).enumerate() {
+        let at = Album::offset(u32::try_from(i).ok()?);
+        if flash.read(at, slot).is_err() {
+            defmt::warn!("album: could not read photo {}", i + 1);
+            return None;
+        }
+        // Half a second for a full album: keep the watchdog happy.
+        watchdog.feed();
+    }
+    defmt::info!(
+        "album: {} photos loaded in {} ms",
+        album.count,
+        now_ms().wrapping_sub(started)
+    );
+    let count = u16::try_from(album.count).ok()?;
+    Some((&ram[..bytes], count))
+}
+
 /// Waits for the blank lines at the top of the next LCD refresh: sleeps
 /// through most of the wait, then watches the line counter. Returns false if
 /// the counter never got there within two refreshes (the LCD is not running).
@@ -136,8 +182,8 @@ mod firmware {
     use ui::frame::Band;
 
     use super::{
-        log_scene, next_tap, now_ms, wait_for_top_blank, Mono, Ordering, BAND_LEN, BAND_ROWS,
-        FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
+        load_album, log_scene, next_tap, now_ms, wait_for_top_blank, Mono, Ordering, BAND_LEN,
+        BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
     };
 
     #[shared]
@@ -148,6 +194,7 @@ mod firmware {
 
     #[local]
     struct Local {
+        painter: Painter,
         leds: Leds,
         led_timer: LedTimer,
         button: Button,
@@ -181,28 +228,26 @@ mod firmware {
             button,
             mut display,
             touch,
-            watchdog,
+            mut watchdog,
             mut flash,
+            hyperram,
             reset_by_watchdog,
             core_clock_hz,
             seed,
         } = Board::init(cx.device);
-        // A photo album written by `cargo proj mbedded photos`, if there is one.
-        let mut header = [0u8; app::album::HEADER_BYTES as usize];
-        match flash
-            .read(0, &mut header)
-            .ok()
-            .and_then(|()| app::album::Album::parse(&header))
-        {
-            Some(album) => defmt::info!("album: {} photos on the flash", album.count),
-            None => defmt::info!("album: none on the flash"),
-        }
+        Mono::start(core.SYST, core_clock_hz);
+
+        // A photo album written by `cargo proj mbedded photos`, if there is
+        // one, copied into the HyperRAM for the celebration's slideshow.
+        let (painter, album_count) = match load_album(&mut flash, hyperram, &mut watchdog) {
+            Some((photos, count)) => (Painter::with_album(photos), count),
+            None => (Painter::new(), 0),
+        };
         if reset_by_watchdog {
             defmt::warn!("started again after a hang");
         }
         defmt::info!("core clock {} Hz", core_clock_hz);
 
-        Mono::start(core.SYST, core_clock_hz);
         // The sticker for the LCD controller's second layer, drawn once.
         ui::sticker::render(display.sticker_pixels());
         // Start from plain pink: the intro fades in over it, and the empty
@@ -215,7 +260,8 @@ mod firmware {
         DWT::unlock();
         core.DWT.enable_cycle_counter();
 
-        let model = Model::new(0);
+        let mut model = Model::new(0);
+        model.album = album_count;
         log_scene(&model);
 
         tick::spawn().ok();
@@ -232,6 +278,7 @@ mod firmware {
                 button,
                 touch,
                 display,
+                painter,
                 stats: FrameStats::new(core_clock_hz, 0),
                 max_wait: SCAN.refresh_us() * (core_clock_hz / 1_000_000),
                 watchdog,
@@ -389,9 +436,9 @@ mod firmware {
     /// of one frame and half of the next (see `app::pacing`).
     #[task(priority = 1, shared = [model, cues], local = [
         display,
+        painter,
         stats,
         max_wait,
-        painter: Painter = Painter::new(),
         band: [u16; BAND_LEN] = [0; BAND_LEN],
         first: bool = true,
         in_step: bool = true,

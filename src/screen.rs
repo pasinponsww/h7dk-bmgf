@@ -28,7 +28,7 @@ use ui::{backdrop, heart as heart_shape, theme};
 use crate::event::Effects;
 use crate::fonts::{PRESS_START, VT323};
 use crate::state::{
-    dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, PHOTO_CARD, RESTART_BUTTON, SCREEN_W,
+    Model, Scene, MAX_DODGES, NEXT_BUTTON, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, SLIDESHOW_CARD,
 };
 use crate::story::{full_mask, Content, CHAPTERS, ENDING, TRACE};
 use crate::trace::{self, DOTS, DOT_AT};
@@ -191,11 +191,14 @@ fn mood(model: &Model, t_ms: u32) -> Mood {
     }
 }
 
-/// Where the dog sits in each scene, and how big each sprite pixel is.
-fn dog_place(scene: Scene) -> (GPoint, u32) {
-    let (x, y, scale) = dog_spot(scene);
+/// Where the dog sits right now, and how big each sprite pixel is.
+fn dog_place(model: &Model) -> (GPoint, u32) {
+    let (x, y, scale) = model.dog_spot();
     (GPoint::new(i32::from(x), i32::from(y)), u32::from(scale))
 }
+
+/// Each photo of the album slideshow stays this long.
+const SLIDE_MS: u32 = 4_000;
 
 /// Draws whole frames. Holds the parts of a frame that are worked out once
 /// and then reused for every band.
@@ -205,6 +208,9 @@ pub struct Painter {
     t_ms: u32,
     dog: [u8; mascot::CELLS],
     glyphs: [u8; backdrop::CELLS],
+    /// The album's photos, one after another (see `crate::album`), if one
+    /// was loaded.
+    album: Option<&'static [u8]>,
 }
 
 impl Default for Painter {
@@ -222,7 +228,24 @@ impl Painter {
             t_ms: 0,
             dog: [mascot::CLEAR; mascot::CELLS],
             glyphs: [0; backdrop::CELLS],
+            album: None,
         }
+    }
+
+    /// A painter that shows `album` (photos one after another, as
+    /// `crate::album` lays them out) as a slideshow on the celebration.
+    pub const fn with_album(album: &'static [u8]) -> Self {
+        let mut p = Self::new();
+        p.album = Some(album);
+        p
+    }
+
+    /// Photo `i` of the album, if there is one.
+    fn album_photo(&self, i: u32) -> Option<Photo> {
+        let bytes = crate::album::PHOTO_BYTES as usize;
+        let start = usize::try_from(i).ok()? * bytes;
+        let px = self.album?.get(start..start + bytes)?;
+        Some(Photo::new(to_u16(crate::album::SIDE), px))
     }
 
     /// Works out the frame for `model` at `t_ms` milliseconds since boot.
@@ -260,7 +283,7 @@ impl Painter {
             Scene::Question => self.question(target)?,
             Scene::Celebration => self.celebration(target)?,
         }
-        let (at, scale) = dog_place(self.model.scene);
+        let (at, scale) = dog_place(&self.model);
         self.draw_dog(target, at, scale)?;
         self.pet_hearts(target)?;
         self.speech_bubble(target)?;
@@ -664,6 +687,23 @@ impl Painter {
     where
         D: DrawTarget<Color = Rgb565>,
     {
+        // The album, one photo after another, each developing in turn.
+        if self.model.album > 0 {
+            let shown = self.since().saturating_sub(WIPE_MS);
+            let i = shown / SLIDE_MS % u32::from(self.model.album);
+            if let Some(photo) = self.album_photo(i) {
+                let mut caption = Line::new();
+                let _ = write!(caption, "{} / {}", i + 1, self.model.album);
+                polaroid_at(
+                    target,
+                    SLIDESHOW_CARD,
+                    &photo,
+                    caption.as_str(),
+                    shown % SLIDE_MS,
+                )?;
+            }
+        }
+
         // Hearts float up the right side, each at its own pace.
         for k in 0..14u32 {
             let h = hash(k.wrapping_mul(0x9e37_79b9) ^ 0x51);
@@ -730,7 +770,7 @@ impl Painter {
         let Some(age) = self.model.attracting_for(self.t_ms) else {
             return Ok(());
         };
-        let dog = dog_rect(self.model.scene);
+        let dog = self.model.dog_rect();
         let bob = to_i16(triangle(age, 1_000, 4));
         let w = to_i16(text_width(ATTRACT_LINE, &FONT_7X13)) + 20;
         let bubble = Rect::new(dog.x + dog.w / 2 + 6, 8 + bob, w, 28);
@@ -768,8 +808,8 @@ impl Painter {
         let Some(age) = self.model.petted_for(self.t_ms) else {
             return Ok(());
         };
-        let dog = dog_rect(self.model.scene);
-        let (_, _, scale) = dog_spot(self.model.scene);
+        let dog = self.model.dog_rect();
+        let (_, _, scale) = self.model.dog_spot();
         let size = u32::from(scale.max(2)) - 1;
         let cx = i32::from(dog.x) + i32::from(dog.w) / 2;
         let head = i32::from(dog.y) + i32::from(dog.h) / 6;
@@ -833,6 +873,10 @@ fn to_u32(v: usize) -> u32 {
 
 fn to_u32_i(v: i32) -> u32 {
     u32::try_from(v).unwrap_or(0)
+}
+
+fn to_u16(v: u32) -> u16 {
+    u16::try_from(v).unwrap_or(u16::MAX)
 }
 
 fn to_i16(v: i32) -> i16 {
@@ -937,8 +981,22 @@ fn polaroid<D>(target: &mut D, photo: &Photo, caption: &str, age: u32) -> Result
 where
     D: DrawTarget<Color = Rgb565>,
 {
+    polaroid_at(target, PHOTO_CARD, photo, caption, age)
+}
+
+/// [`polaroid`] resting at `rest`.
+fn polaroid_at<D>(
+    target: &mut D,
+    rest: Rect,
+    photo: &Photo,
+    caption: &str,
+    age: u32,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
     let drop = DROP_MS.saturating_sub(age) * 60 / DROP_MS;
-    let card = lowered(PHOTO_CARD, -to_i16(to_i32_u(drop)));
+    let card = lowered(rest, -to_i16(to_i32_u(drop)));
     shadow(target, card, 4)?;
     rounded(target, card, 4, theme::POLAROID, Some((theme::MAUVE, 1)))?;
     let (x, y) = (i32::from(card.x), i32::from(card.y));
@@ -1756,6 +1814,37 @@ mod tests {
         assert!((2..=5).contains(&half), "{half}");
         assert_eq!(developed(DROP_MS + DEVELOP_MS), 15);
         assert_eq!(developed(u32::MAX / 2), 15);
+    }
+
+    #[test]
+    fn the_celebration_shows_the_album_as_a_slideshow() {
+        static ALBUM: [u8; 2 * crate::album::PHOTO_BYTES as usize] =
+            [0x55; 2 * crate::album::PHOTO_BYTES as usize];
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let t = r.m.now_ms + WIPE_MS + SLIDE_MS - 100;
+        let frame_white = |p: &mut Painter, m: &Model| {
+            p.prepare(m, &Cues::new(), t);
+            let f = full_frame(p);
+            let raw = theme::to_raw(theme::POLAROID);
+            let (x0, y0) = (SLIDESHOW_CARD.x as usize, SLIDESHOW_CARD.y as usize);
+            (y0..y0 + SLIDESHOW_CARD.h as usize)
+                .flat_map(|y| (x0..x0 + SLIDESHOW_CARD.w as usize).map(move |x| y * WIDTH + x))
+                .filter(|&i| f[i] == raw)
+                .count()
+        };
+        assert_eq!(
+            frame_white(&mut Painter::new(), &r.m),
+            0,
+            "no album, no slideshow"
+        );
+        let before = r.m.dog_rect();
+        r.m.album = 2;
+        assert!(frame_white(&mut Painter::with_album(&ALBUM), &r.m) > 3_000);
+        assert_ne!(r.m.dog_rect(), before, "the dog makes room");
+        assert!(r.m.dog_rect().w < before.w, "and sits smaller");
     }
 
     #[test]
