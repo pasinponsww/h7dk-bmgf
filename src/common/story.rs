@@ -1,5 +1,6 @@
 //! The story: what the logic needs to know about it, and the story itself.
 use geometry::Rect;
+use ui::icon::Icon;
 
 /// Read-only view of the story.
 pub trait Story {
@@ -30,6 +31,8 @@ pub struct Hotspot {
     pub rect: Rect,
     /// Name of its icon in `assets/icons/phosphor/duotone`.
     pub icon: &'static str,
+    /// That icon, baked into pixels at build time. Shown once it is found.
+    pub art: &'static Icon,
     /// The line revealed when it is tapped.
     pub line: &'static str,
     /// The same moment in Chinese, or empty.
@@ -92,6 +95,7 @@ const fn hs(
     count: usize,
     index: usize,
     icon: &'static str,
+    art: &'static Icon,
     line: &'static str,
     zh: &'static str,
     pinyin: &'static str,
@@ -100,6 +104,7 @@ const fn hs(
     Hotspot {
         rect: Rect::new(x, y, OBJECT_SIZE, OBJECT_SIZE),
         icon,
+        art,
         line,
         zh,
         pinyin,
@@ -190,6 +195,21 @@ mod tests {
                 assert!(!h.line.trim().is_empty(), "{}: empty line", c.title);
                 assert!(h.line.chars().count() <= 160, "{}: line too long", c.title);
                 assert!(!h.icon.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn every_object_has_its_icon_baked_in() {
+        for c in &CHAPTERS {
+            for h in c.hotspots {
+                let size = usize::from(h.art.size);
+                assert!(size > 16, "{}: icon {} is tiny", c.title, h.icon);
+                assert_eq!(h.art.px.len(), size * size, "{}: {}", c.title, h.icon);
+                let outline = h.art.px.iter().filter(|&&b| b >> 4 == 15).count();
+                let fill = h.art.px.iter().filter(|&&b| b & 15 == 15).count();
+                assert!(outline > size, "{}: {} has no outline", c.title, h.icon);
+                assert!(fill > size, "{}: {} has no fill", c.title, h.icon);
             }
         }
     }

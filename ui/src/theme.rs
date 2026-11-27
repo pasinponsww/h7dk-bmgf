@@ -30,6 +30,8 @@ pub const MAUVE: Rgb565 = rgb(0xEA, 0xDB, 0xDD);
 pub const TEXT: Rgb565 = rgb(0x3B, 0x3F, 0x4A);
 /// Icon color, a deeper tone of the tile pink `#A9506B`.
 pub const ICON: Rgb565 = rgb(0xA9, 0x50, 0x6B);
+/// The soft fill inside a found object's icon, rose pink `#F5A9BD`.
+pub const ICON_FILL: Rgb565 = rgb(0xF5, 0xA9, 0xBD);
 /// Quiet text: hints and buttons that do not work yet, `#8C858E`.
 pub const MUTED: Rgb565 = rgb(0x8C, 0x85, 0x8E);
 /// Text on an [`ICON`]-colored button: the background pink.

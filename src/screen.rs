@@ -19,6 +19,7 @@ use embedded_graphics::primitives::{
 use embedded_graphics::text::{Baseline, Text};
 use embedded_graphics::Drawable;
 use ui::frame::Scaled;
+use ui::icon::{Icon, Tones};
 use ui::mascot::{self, Mood};
 use ui::{backdrop, theme};
 
@@ -50,6 +51,12 @@ const CARD_PAD_X: i32 = 8;
 const CARD_PAD_TOP: i32 = 4;
 /// Left column of the intro and the celebration, where the dog sits.
 const RIGHT_COLUMN_X: i32 = 200;
+/// Colors of a found object's icon: a pink fill under a deep pink outline.
+const ICON_TONES: Tones = Tones {
+    back: theme::SURFACE,
+    fill: theme::ICON_FILL,
+    line: theme::ICON,
+};
 
 /// The short-lived effects (ripple, hint, pop), remembered with the time they
 /// started so they can animate for a while after the event that caused them.
@@ -292,6 +299,7 @@ impl Painter {
             self.object(
                 target,
                 h.rect,
+                h.art,
                 idx,
                 found & (1 << i) != 0,
                 shown == Some(idx),
@@ -372,6 +380,7 @@ impl Painter {
         &self,
         target: &mut D,
         rect: Rect,
+        art: &Icon,
         idx: u8,
         found: bool,
         shown: bool,
@@ -409,7 +418,9 @@ impl Painter {
         rounded(target, r, 14, fill, Some(border))?;
         let (cx, cy) = center(r);
         if found {
-            heart(target, GPoint::new(cx - 15, cy - 12), 6, theme::HEART)
+            // The object's own icon, from the story file.
+            let half = i32::from(art.size) / 2;
+            art.draw(target, GPoint::new(cx - half, cy - half), ICON_TONES)
         } else {
             big_text_centered(target, "?", cx, cy - 20, theme::ICON, 2)
         }

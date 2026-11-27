@@ -1,9 +1,12 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const MAX_LINE: usize = 160;
+/// Icons are baked at this many pixels square. The object tiles are 64.
+const ICON_PX: u32 = 44;
 
 fn fail(message: &str) -> ! {
     panic!("\n\nstory error: {message}\n");
@@ -133,6 +136,103 @@ fn link_memory_map(root: &Path, out: &Path) {
     println!("cargo:rerun-if-changed=memory.x");
 }
 
+/// Splits a Phosphor duotone SVG into its soft fill layer (the paths drawn at
+/// 20% opacity) and its outline layer, as two SVGs drawn fully opaque.
+fn icon_layers(svg: &str, file: &Path) -> (String, String) {
+    let bad = |why: &str| -> ! { fail(&format!("{}: {why}", file.display())) };
+    let head_end = svg
+        .find("<svg")
+        .and_then(|s| svg[s..].find('>').map(|e| s + e))
+        .unwrap_or_else(|| bad("no <svg> tag"));
+    let head = &svg[..=head_end];
+    let (mut fill, mut line) = (String::new(), String::new());
+    let mut rest = &svg[head_end + 1..];
+    while let Some(start) = rest.find("<path") {
+        let end = rest[start..]
+            .find("/>")
+            .map(|e| start + e + 2)
+            .unwrap_or_else(|| bad("a <path> is not closed with />"));
+        let element = &rest[start..end];
+        match element.find(" opacity=\"") {
+            Some(at) => {
+                let value_end = element[at + 10..]
+                    .find('"')
+                    .map(|e| at + 10 + e + 1)
+                    .unwrap_or_else(|| bad("an opacity value is not closed"));
+                fill.push_str(&element[..at]);
+                fill.push_str(&element[value_end..]);
+            }
+            None => line.push_str(element),
+        }
+        rest = &rest[end..];
+    }
+    if line.is_empty() {
+        bad("no outline <path> found");
+    }
+    (format!("{head}{fill}</svg>"), format!("{head}{line}</svg>"))
+}
+
+/// How much `svg` covers each pixel when drawn `size` pixels square, from 0
+/// to 15, row by row.
+fn coverage(svg: &str, size: u32, file: &Path) -> Vec<u8> {
+    use resvg::{tiny_skia, usvg};
+    let tree = usvg::Tree::from_str(svg, &usvg::Options::default())
+        .unwrap_or_else(|e| fail(&format!("{}: {e}", file.display())));
+    let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("icon size is not zero");
+    let scale = size as f32 / tree.size().width();
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    pixmap
+        .pixels()
+        .iter()
+        .map(|p| u8::try_from((u32::from(p.alpha()) * 15 + 127) / 255).unwrap_or(15))
+        .collect()
+}
+
+/// Bakes every icon the story uses into `out/icons/<name>.bin` (see
+/// `ui::icon`) and returns the Rust statics that hold them, keyed by icon name.
+fn bake_icons<'a>(
+    icons: &Path,
+    out: &Path,
+    names: impl Iterator<Item = &'a str>,
+) -> BTreeMap<String, String> {
+    let dir = out.join("icons");
+    fs::create_dir_all(&dir).expect("could not create the icon folder");
+    let mut statics = BTreeMap::new();
+    for name in names {
+        if statics.contains_key(name) {
+            continue;
+        }
+        let file = icons.join(format!("{name}.svg"));
+        println!("cargo:rerun-if-changed={}", file.display());
+        let svg = fs::read_to_string(&file)
+            .unwrap_or_else(|e| fail(&format!("cannot read {}: {e}", file.display())));
+        let (fill, line) = icon_layers(&svg, &file);
+        let fill = coverage(&fill, ICON_PX, &file);
+        let line = coverage(&line, ICON_PX, &file);
+        let px: Vec<u8> = line.iter().zip(&fill).map(|(l, f)| l << 4 | f).collect();
+        let bin = dir.join(format!("{name}.bin"));
+        fs::write(&bin, px).expect("could not write an icon");
+        let ident = icon_ident(name);
+        let bin = bin.display().to_string();
+        statics.insert(
+            name.to_string(),
+            format!(
+                "static {ident}: ui::icon::Icon = ui::icon::Icon::new({ICON_PX}, include_bytes!({bin:?}));
+"
+            ),
+        );
+    }
+    statics
+}
+
+fn icon_ident(name: &str) -> String {
+    format!("ICON_{}", name.to_uppercase().replace('-', "_"))
+}
+
 fn write_story_table(root: &Path, out: &Path) {
     println!("cargo:rerun-if-env-changed=H7_STORY");
     let name = env::var("H7_STORY").unwrap_or_else(|_| "default".to_string());
@@ -163,7 +263,18 @@ fn write_story_table(root: &Path, out: &Path) {
         fail("the story needs at least one chapter");
     }
 
+    let used = chapters
+        .iter()
+        .filter_map(|c| c.get("object").and_then(toml::Value::as_array))
+        .flatten()
+        .filter_map(|o| o.get("icon").and_then(toml::Value::as_str))
+        .filter(|name| icons.join(format!("{name}.svg")).is_file());
+    let baked = bake_icons(&icons, out, used);
+
     let mut code = String::new();
+    for line in baked.values() {
+        code.push_str(line);
+    }
     writeln!(
         code,
         "/// All chapters, in order.\npub static CHAPTERS: [Chapter; {}] = [",
@@ -220,8 +331,9 @@ fn write_story_table(root: &Path, out: &Path) {
             let (zh, pinyin) = chinese(table, &label);
             writeln!(
                 code,
-                "        hs({}, {oi}, {icon:?}, {line:?}, {zh:?}, {pinyin:?}),",
-                objects.len()
+                "        hs({}, {oi}, {icon:?}, &{}, {line:?}, {zh:?}, {pinyin:?}),",
+                objects.len(),
+                icon_ident(icon),
             )
             .unwrap();
         }
