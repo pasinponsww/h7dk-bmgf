@@ -32,6 +32,10 @@ pub const TEXT: Rgb565 = rgb(0x3B, 0x3F, 0x4A);
 pub const ICON: Rgb565 = rgb(0xA9, 0x50, 0x6B);
 /// The soft fill inside a found object's icon, rose pink `#F5A9BD`.
 pub const ICON_FILL: Rgb565 = rgb(0xF5, 0xA9, 0xBD);
+/// The close, darker half of the soft shadow under tiles and buttons, `#EFC9D4`.
+pub const SHADOW: Rgb565 = rgb(0xEF, 0xC9, 0xD4);
+/// The far, lighter half of that shadow, `#F7DDE5`.
+pub const SHADOW_SOFT: Rgb565 = rgb(0xF7, 0xDD, 0xE5);
 /// Quiet text: hints and buttons that do not work yet, `#8C858E`.
 pub const MUTED: Rgb565 = rgb(0x8C, 0x85, 0x8E);
 /// Text on an [`ICON`]-colored button: the background pink.

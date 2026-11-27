@@ -263,6 +263,7 @@ impl Painter {
         big_text_centered(target, INTRO_TITLE, center, 64, theme::TEXT, 2)?;
         let button = Rect::new(to_i16(center - 70), 140, 140, 48);
         let pulse = to_i16(triangle(self.since(), 1_200, 5));
+        pill_shadow(target, button)?;
         ring(target, grow(button, 2 + pulse), 24, theme::TILE, 3)?;
         pill(target, button, theme::ICON, None)?;
         label(target, button, INTRO_BUTTON, theme::ON_ICON)?;
@@ -307,6 +308,7 @@ impl Painter {
         }
 
         // The card with the revealed line, or a hint.
+        shadow(target, CARD, 10)?;
         rounded(target, CARD, 10, theme::SURFACE, Some((theme::MAUVE, 2)))?;
         let left = i32::from(CARD.x) + CARD_PAD_X;
         let top = i32::from(CARD.y) + CARD_PAD_TOP;
@@ -341,6 +343,7 @@ impl Painter {
 
         // Next.
         let unlocked = self.model.next_unlocked(&Content);
+        shadow(target, NEXT_BUTTON, 12)?;
         if unlocked {
             let pulse = to_i16(triangle(self.since(), 900, 4));
             ring(target, grow(NEXT_BUTTON, 2 + pulse), 14, theme::TILE, 3)?;
@@ -410,6 +413,8 @@ impl Painter {
                 }
             }
         }
+        // The shadow stays where the tile rests, so a bobbing tile floats.
+        shadow(target, rect, 14)?;
         let (fill, border) = match (found, shown) {
             (_, true) => (theme::SURFACE, (theme::ICON, 4)),
             (true, false) => (theme::SURFACE, (theme::MAUVE, 3)),
@@ -439,11 +444,13 @@ impl Painter {
         let no = self.model.no_rect;
         let label_index = usize::from(self.model.dodges.min(MAX_DODGES));
         let no_label = ENDING.no_labels.get(label_index).copied().unwrap_or("No");
+        pill_shadow(target, no)?;
         pill(target, no, theme::SURFACE, Some((theme::TEXT, 3)))?;
         label(target, no, no_label, theme::TEXT)?;
 
         let yes = self.model.yes_rect();
         let pulse = to_i16(triangle(self.since(), 1_000, 4));
+        pill_shadow(target, yes)?;
         ring(target, grow(yes, 2 + pulse), 30, theme::TILE, 3)?;
         pill(target, yes, theme::ICON, None)?;
         label(target, yes, ENDING.yes, theme::ON_ICON)
@@ -486,6 +493,7 @@ impl Painter {
             y += 24;
         }
 
+        pill_shadow(target, RESTART_BUTTON)?;
         pill(
             target,
             RESTART_BUTTON,
@@ -624,6 +632,29 @@ where
     RoundedRectangle::with_equal_corners(area, Size::new(radius, radius))
         .into_styled(style.build())
         .draw(target)
+}
+
+/// `r` moved down by `dy` pixels.
+fn lowered(r: Rect, dy: i16) -> Rect {
+    Rect::new(r.x, r.y + dy, r.w, r.h)
+}
+
+/// A soft shadow under a rounded shape `r`: a light layer four pixels down
+/// and a darker one two pixels down. Draw it before the shape.
+fn shadow<D>(target: &mut D, r: Rect, radius: u32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    rounded(target, lowered(r, 4), radius, theme::SHADOW_SOFT, None)?;
+    rounded(target, lowered(r, 2), radius, theme::SHADOW, None)
+}
+
+/// [`shadow`] for a [`pill`].
+fn pill_shadow<D>(target: &mut D, r: Rect) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    shadow(target, r, to_u32_i(i32::from(r.h.min(r.w)) / 2))
 }
 
 /// A rounded rectangle with fully round ends.
