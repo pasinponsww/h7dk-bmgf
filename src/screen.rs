@@ -98,6 +98,8 @@ const INTRO_TITLE: &str = "For you";
 const INTRO_BUTTON: &str = "Open";
 /// Small line under the intro button.
 const INTRO_HINT: &str = "tap to open, or pet me";
+/// The same after a power cut, when Open picks up where she was.
+const INTRO_HINT_RESUME: &str = "tap to carry on, or pet me";
 /// What the dog's speech bubble says when it wants attention.
 const ATTRACT_LINE: &str = "tap me!";
 /// The dog plays in cycles this long: jumping first, then a happy bounce.
@@ -392,7 +394,12 @@ impl Painter {
         ring(target, grow(button, 2 + pulse), 24, theme::TILE, 3)?;
         pill(target, button, theme::ICON, None)?;
         label(target, button, INTRO_BUTTON, theme::ON_ICON)?;
-        text_centered(target, INTRO_HINT, center, 204, &FONT_7X13, theme::MUTED)?;
+        let hint = if self.model.resume == crate::save::Resume::Start {
+            INTRO_HINT
+        } else {
+            INTRO_HINT_RESUME
+        };
+        text_centered(target, hint, center, 204, &FONT_7X13, theme::MUTED)?;
         // How long it has been, or happy anniversary on the day.
         if let Some(line) = together_line(self.model.today) {
             let at = GPoint::new(center - text_width(line.as_str(), &VT323) / 2, 226);
@@ -761,6 +768,14 @@ impl Painter {
             Align::Center(center),
             y,
         )?;
+
+        // Every yes after the first is counted.
+        if self.model.yes_count > 1 {
+            let mut count = Line::new();
+            let _ = write!(count, "(yes number {})", self.model.yes_count);
+            let at = GPoint::new(center - text_width(count.as_str(), &VT323) / 2, 178);
+            font_text(target, count.as_str(), at, &VT323, 1, theme::MUTED)?;
+        }
 
         pill_shadow(target, RESTART_BUTTON)?;
         pill(

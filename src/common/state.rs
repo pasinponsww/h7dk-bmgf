@@ -5,6 +5,7 @@
 use geometry::{Point, Rect};
 
 use crate::calendar::Date;
+use crate::save::{Progress, Resume};
 use crate::story::{full_mask, Story};
 
 /// Logical screen width in pixels (the 4.3" LCD on the STM32H735G-DK).
@@ -136,6 +137,11 @@ pub struct Model {
     pub album: u16,
     /// Today, from the real-time clock, once it knows.
     pub today: Option<Date>,
+    /// Where the story picks up from the intro: the start, or where it was
+    /// when the board lost power.
+    pub resume: Resume,
+    /// How many times she has said yes, on this board, ever.
+    pub yes_count: u32,
 }
 
 impl Model {
@@ -157,11 +163,34 @@ impl Model {
             photo_ms: None,
             album: 0,
             today: None,
+            resume: Resume::Start,
+            yes_count: 0,
         }
+    }
+
+    /// What is saved across a power-off.
+    pub fn progress(&self) -> Progress {
+        Progress {
+            resume: self.resume,
+            yes_count: self.yes_count,
+        }
+    }
+
+    /// Picks up saved progress, at start-up.
+    pub fn restore(&mut self, p: Progress) {
+        self.resume = p.resume;
+        self.yes_count = p.yes_count;
     }
 
     /// Switches scene and resets the per-scene timers.
     pub(crate) fn go(&mut self, scene: Scene) {
+        // Remember the place, in case the power goes.
+        match scene {
+            Scene::Story { chapter, .. } => self.resume = Resume::Chapter(chapter),
+            Scene::Trace { .. } | Scene::Question => self.resume = Resume::Question,
+            Scene::Celebration => self.resume = Resume::Start,
+            Scene::Intro => {}
+        }
         self.scene = scene;
         self.scene_start_ms = self.now_ms;
         self.last_touch_ms = self.now_ms;

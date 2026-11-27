@@ -5,6 +5,7 @@ pub mod cache;
 pub mod clock;
 pub mod flash;
 pub mod hyperram;
+pub mod storage;
 
 pub use board::{
     Board, Button, Display, LedTimer, Leds, Touch, TouchPoint, Watchdog, LCD_HEIGHT, LCD_PIXELS,

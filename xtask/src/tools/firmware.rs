@@ -280,7 +280,8 @@ RAM : ORIGIN = 0, LENGTH = 64K
         assert_eq!(
             memory_limits(&text),
             Some(Limits {
-                flash: 1024 * 1024,
+                // The last 128 KB sector keeps saved progress.
+                flash: 896 * 1024,
                 ram: 128 * 1024,
                 axi: 320 * 1024
             })

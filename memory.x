@@ -1,5 +1,8 @@
 /* STM32H735IG: 1 MB flash, 128 KB DTCM, 320 KB AXI SRAM.
 
+   FLASH stops at 896 KB: the last 128 KB sector keeps saved progress
+   (crates/bsp/src/storage.rs), so the firmware must never be put there.
+
    RAM is the DTCM, wired straight to the core: variables and the stack live
    there, so the CPU does not fight the debugger or the LCD controller for the
    main bus while it draws. The DTCM is also the fastest RAM on the chip.
@@ -14,7 +17,7 @@
    DTCM (a bus fault before main). */
 MEMORY
 {
-  FLASH   : ORIGIN = 0x08000000, LENGTH = 1024K
+  FLASH   : ORIGIN = 0x08000000, LENGTH = 896K
   RAM     : ORIGIN = 0x20000000, LENGTH = 128K
   AXISRAM : ORIGIN = 0x24000000, LENGTH = 320K
 }

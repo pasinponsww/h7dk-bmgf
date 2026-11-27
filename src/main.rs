@@ -99,6 +99,40 @@ fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
+/// Writes `progress` into the next empty slot of the save sector, erasing it
+/// first when every slot is used.
+fn save_progress(
+    sector: &mut bsp::storage::SaveSector,
+    saved: &mut app::save::Found,
+    progress: app::save::Progress,
+    watchdog: &mut bsp::Watchdog,
+) {
+    let slot = match saved.free {
+        Some(slot) => slot,
+        None => {
+            // About a second with the CPU waiting on the flash.
+            watchdog.feed();
+            if sector.erase().is_err() {
+                defmt::warn!("save: could not erase the sector");
+                return;
+            }
+            watchdog.feed();
+            0
+        }
+    };
+    let seq = saved.seq.wrapping_add(1);
+    if sector.write(slot, &progress.encode(seq)).is_err() {
+        defmt::warn!("save: could not write slot {}", slot);
+        return;
+    }
+    let next = slot + 1;
+    *saved = app::save::Found {
+        progress,
+        seq,
+        free: (next < bsp::storage::SLOTS).then_some(next),
+    };
+}
+
 /// The clock's moment in the app's calendar types.
 fn moment_of(t: bsp::clock::Moment) -> app::calendar::DateTime {
     app::calendar::DateTime {
@@ -196,9 +230,9 @@ mod firmware {
     use ui::frame::Band;
 
     use super::{
-        load_album, log_scene, moment_of, next_tap, now_ms, wait_for_top_blank, Mono, Ordering,
-        BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN,
-        TICK_MS,
+        load_album, log_scene, moment_of, next_tap, now_ms, save_progress, wait_for_top_blank,
+        Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS,
+        LONG_PRESS_MS, SCAN, TICK_MS,
     };
 
     #[shared]
@@ -210,6 +244,8 @@ mod firmware {
     #[local]
     struct Local {
         painter: Painter,
+        save: bsp::storage::SaveSector,
+        saved: app::save::Found,
         clock: bsp::clock::Clock,
         leds: Leds,
         led_timer: LedTimer,
@@ -248,6 +284,7 @@ mod firmware {
             mut flash,
             hyperram,
             mut clock,
+            save,
             reset_by_watchdog,
             core_clock_hz,
             seed,
@@ -298,7 +335,16 @@ mod firmware {
             None => defmt::info!("clock: not set (build with cargo proj to set it)"),
         }
 
+        // Saved progress: where the story was, and how many yeses.
+        let found = app::save::scan(save.bytes());
+        defmt::info!(
+            "save: {} yes so far, slot {} free",
+            found.progress.yes_count,
+            found.free.unwrap_or(usize::MAX)
+        );
+
         let mut model = Model::new(0);
+        model.restore(found.progress);
         model.album = album_count;
         model.today = clock.now().map(|t| moment_of(t).date);
         log_scene(&model);
@@ -312,6 +358,8 @@ mod firmware {
                 cues: Cues::new(),
             },
             Local {
+                save,
+                saved: found,
                 clock,
                 leds,
                 led_timer,
@@ -334,7 +382,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, clock, gesture: Gesture = Gesture::new(), last_date_read: u32 = 0])]
+    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, clock, save, saved, gesture: Gesture = Gesture::new(), last_date_read: u32 = 0])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -392,7 +440,7 @@ mod firmware {
             }
 
             let rng = &mut *cx.local.rng;
-            let (fx, tap_turned) = cx.shared.model.lock(|model| {
+            let (fx, tap_turned, progress) = cx.shared.model.lock(|model| {
                 let before = model.scene;
                 let mut fx = update(model, &story, rng, Event::Tick { now_ms: now });
                 let mut all = fx;
@@ -439,8 +487,12 @@ mod firmware {
                     log_scene(model);
                 }
                 all.leds = fx.leds;
-                (all, tap_turned)
+                (all, tap_turned, model.progress())
             });
+            // Keep what changed, in case the power goes.
+            if progress != cx.local.saved.progress {
+                save_progress(cx.local.save, cx.local.saved, progress, cx.local.watchdog);
+            }
             // The tap that started this touch already turned the page, so
             // the same touch must not turn it again as a swipe.
             if tap_turned {

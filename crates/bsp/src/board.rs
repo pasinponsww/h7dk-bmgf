@@ -21,6 +21,7 @@ use stm32h7xx_hal::{pac, prelude::*};
 use crate::clock::Clock;
 use crate::flash::ExternalFlash;
 use crate::hyperram::HyperRamPort;
+use crate::storage::SaveSector;
 
 pub const LCD_WIDTH: usize = 480;
 pub const LCD_HEIGHT: usize = 272;
@@ -44,6 +45,8 @@ pub struct Board {
     pub hyperram: HyperRamPort,
     /// The real-time clock.
     pub clock: Clock,
+    /// The flash sector that keeps saved progress.
+    pub save: SaveSector,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -228,6 +231,7 @@ impl Board {
             flash,
             hyperram,
             clock,
+            save: SaveSector::new(dp.FLASH),
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

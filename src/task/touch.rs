@@ -6,6 +6,7 @@ use rng::Rng;
 
 use crate::event::Effects;
 use crate::gesture::Swipe;
+use crate::save::Resume;
 use crate::state::{
     Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON, NO_AREA,
     PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
@@ -32,10 +33,19 @@ pub(crate) fn on_down<S: Story, R: Rng>(
     match m.scene {
         Scene::Intro if m.dog_rect().contains(p) => pet(m, fx),
         Scene::Intro => {
-            m.go(Scene::Story {
-                chapter: 0,
-                found: 0,
-                shown: None,
+            // From the start, or back where she was when the power went.
+            m.go(match m.resume {
+                Resume::Start => Scene::Story {
+                    chapter: 0,
+                    found: 0,
+                    shown: None,
+                },
+                Resume::Chapter(chapter) => Scene::Story {
+                    chapter,
+                    found: 0,
+                    shown: None,
+                },
+                Resume::Question => Scene::Question,
             });
             fx.scene_changed = true;
             fx.redraw = true;
@@ -107,9 +117,11 @@ fn pet(m: &mut Model, fx: &mut Effects) {
     fx.redraw = true;
 }
 
-/// Back to the intro, as if the board had just started.
+/// Back to the intro, as if the board had just started: the story starts
+/// from the beginning again.
 pub(crate) fn restart(m: &mut Model, fx: &mut Effects) {
     m.go(Scene::Intro);
+    m.resume = Resume::Start;
     fx.scene_changed = true;
     fx.redraw = true;
 }
@@ -262,6 +274,7 @@ fn question_touch<R: Rng>(m: &mut Model, rng: &mut R, p: Point, fx: &mut Effects
 }
 
 fn celebrate(m: &mut Model, fx: &mut Effects) {
+    m.yes_count = m.yes_count.saturating_add(1);
     m.go(Scene::Celebration);
     fx.scene_changed = true;
     fx.redraw = true;
@@ -271,6 +284,7 @@ fn celebrate(m: &mut Model, fx: &mut Effects) {
 mod tests {
     use crate::common::testing::{story_state, Fake, Rig, CH0};
     use crate::gesture::Swipe;
+    use crate::save::Resume;
     use crate::state::{
         dog_rect, Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, PET_MS, RESTART_BUTTON,
     };
@@ -566,6 +580,55 @@ mod tests {
         let fx = r.drag(CH0[0].x + 4, CH0[0].y + 4);
         assert!(!fx.redraw);
         assert_eq!(r.m.scene, before, "dragging over an object does not tap it");
+    }
+
+    #[test]
+    fn a_yes_is_counted_and_the_next_time_starts_from_the_beginning() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        assert_eq!(
+            r.m.resume,
+            Resume::Question,
+            "a power cut now comes back here"
+        );
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        assert_eq!((r.m.yes_count, r.m.resume), (1, Resume::Start));
+        r.tap_rect(RESTART_BUTTON);
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        assert_eq!(r.m.yes_count, 2);
+    }
+
+    #[test]
+    fn after_a_power_cut_the_intro_opens_where_she_was() {
+        let mut r = Rig::new();
+        r.m.restore(crate::save::Progress {
+            resume: Resume::Chapter(1),
+            yes_count: 3,
+        });
+        r.tap(300, 30);
+        assert_eq!(story_state(&r.m), (1, 0, None));
+        let mut q = Rig::new();
+        q.m.restore(crate::save::Progress {
+            resume: Resume::Question,
+            yes_count: 0,
+        });
+        q.tap(300, 30);
+        assert_eq!(q.m.scene, Scene::Question);
+    }
+
+    #[test]
+    fn the_long_press_forgets_the_place() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        r.tap_rect(CH0[0]);
+        r.tap_rect(CH0[1]);
+        r.tap_next();
+        assert_eq!(r.m.resume, Resume::Chapter(1));
+        r.send(Event::Restart);
+        assert_eq!(r.m.resume, Resume::Start);
     }
 
     #[test]
