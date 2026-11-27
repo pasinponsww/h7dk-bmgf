@@ -52,12 +52,39 @@ impl Story for FakeTrace {
     }
 }
 
+/// [`FakeTrace`] with a three-slide finale after the heart, each slide
+/// staying 5 seconds.
+pub struct FakeFinale;
+
+impl Story for FakeFinale {
+    fn chapter_count(&self) -> usize {
+        Fake.chapter_count()
+    }
+    fn hotspot_count(&self, chapter: usize) -> usize {
+        Fake.hotspot_count(chapter)
+    }
+    fn hotspot_rect(&self, chapter: usize, index: usize) -> Rect {
+        Fake.hotspot_rect(chapter, index)
+    }
+    fn trace_heart(&self) -> bool {
+        true
+    }
+    fn finale_count(&self) -> usize {
+        3
+    }
+    fn slide_ms(&self, _: usize) -> u32 {
+        5_000
+    }
+}
+
 /// A model, a random source and shortcuts for sending events.
 pub struct Rig {
     pub m: Model,
     pub rng: XorShift32,
     /// Use [`FakeTrace`] instead of [`Fake`].
     pub trace: bool,
+    /// Use [`FakeFinale`] instead.
+    pub finale: bool,
 }
 
 impl Rig {
@@ -66,6 +93,16 @@ impl Rig {
             m: Model::new(0),
             rng: XorShift32::new(7),
             trace: false,
+            finale: false,
+        }
+    }
+
+    /// A rig whose story has the heart and a three-slide finale.
+    pub fn with_finale() -> Self {
+        Self {
+            trace: true,
+            finale: true,
+            ..Self::new()
         }
     }
 
@@ -78,7 +115,9 @@ impl Rig {
     }
 
     pub fn send(&mut self, ev: Event) -> Effects {
-        if self.trace {
+        if self.finale {
+            update(&mut self.m, &FakeFinale, &mut self.rng, ev)
+        } else if self.trace {
             update(&mut self.m, &FakeTrace, &mut self.rng, ev)
         } else {
             update(&mut self.m, &Fake, &mut self.rng, ev)

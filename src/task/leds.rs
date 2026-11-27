@@ -68,6 +68,8 @@ pub fn sample(scene: Scene, t_ms: u32) -> (u8, u8) {
             let dots = (hit & crate::trace::ALL).count_ones();
             (breathe(t_ms, 2_000, 90), heartbeat(t_ms, 1_100 - dots * 25))
         }
+        // The finale: a calm heartbeat over a soft green glow.
+        Scene::Finale { .. } => (breathe(t_ms, 4_000, 60), heartbeat(t_ms, 1_000)),
         // The heart races at the big question.
         Scene::Question => (0, heartbeat(t_ms, 650)),
         // Both at once: a happy heartbeat over a quick green breath.

@@ -63,6 +63,8 @@ pub enum Power {
     Asleep,
 }
 
+/// A finale slide can be tapped on to the next once it has been up this long.
+pub const SLIDE_MIN_MS: u32 = 1_500;
 /// A finished heart stays on screen this long before the question opens.
 pub const TRACE_ADMIRE_MS: u32 = 1_400;
 /// Where a chapter's polaroid sits once every object is found: over the
@@ -79,6 +81,7 @@ pub const fn dog_spot(scene: Scene) -> (i16, i16, u8) {
         Scene::Intro => (40, 56, 4),
         Scene::Story { .. } => (74, 72, 3),
         Scene::Trace { .. } => (28, 96, 3),
+        Scene::Finale { .. } => (14, 188, 2),
         Scene::Question => (396, 14, 2),
         Scene::Celebration => (36, 56, 4),
     }
@@ -116,6 +119,11 @@ pub enum Scene {
     Trace {
         /// Bitmask of the dots traced so far (see `crate::trace`).
         hit: u32,
+    },
+    /// The finale: slides of sentences and photos, before the question.
+    Finale {
+        /// Zero-based slide number.
+        slide: u8,
     },
     /// "Will you be my girlfriend?"
     Question,
@@ -207,6 +215,7 @@ impl Model {
         match scene {
             Scene::Story { chapter, .. } => self.resume = Resume::Chapter(chapter),
             Scene::Trace { .. } | Scene::Question => self.resume = Resume::Question,
+            Scene::Finale { slide } => self.resume = Resume::Finale(slide),
             Scene::Celebration => self.resume = Resume::Start,
             Scene::Intro => {}
         }

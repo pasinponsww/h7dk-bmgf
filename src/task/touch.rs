@@ -9,7 +9,7 @@ use crate::gesture::Swipe;
 use crate::save::Resume;
 use crate::state::{
     Model, Power, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
-    NO_AREA, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
+    NO_AREA, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, SLIDE_MIN_MS, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 use crate::trace;
@@ -54,15 +54,24 @@ pub(crate) fn on_down<S: Story, R: Rng>(
                     shown: None,
                 },
                 Resume::Question => Scene::Question,
+                Resume::Finale(slide) => Scene::Finale { slide },
             });
             fx.scene_changed = true;
             fx.redraw = true;
         }
         Scene::Story { chapter, found, .. } => story_touch(m, story, chapter, found, p, fx),
+        Scene::Finale { slide } => {
+            if m.dog_rect().contains(p) {
+                pet(m, fx);
+            } else if m.now_ms.wrapping_sub(m.scene_start_ms) >= SLIDE_MIN_MS {
+                // A tap moves on, once the slide has had a moment.
+                next_slide(m, story, slide, fx);
+            }
+        }
         Scene::Trace { hit } => {
             if m.skip_ok && m.traced_ms.is_none() && NEXT_BUTTON.contains(p) {
-                // Given up on drawing: straight on to the question.
-                m.go(Scene::Question);
+                // Given up on drawing: on to the finale or the question.
+                m.go(after_trace(story));
                 fx.scene_changed = true;
                 fx.redraw = true;
             } else if m.dog_rect().contains(p) {
@@ -200,7 +209,7 @@ fn turn_page<S: Story>(m: &mut Model, story: &S, ch: usize, found: u8, fx: &mut 
         m.go(if story.trace_heart() {
             Scene::Trace { hit: 0 }
         } else {
-            Scene::Question
+            after_trace(story)
         });
     } else {
         m.go(Scene::Story {
@@ -213,11 +222,49 @@ fn turn_page<S: Story>(m: &mut Model, story: &S, ch: usize, found: u8, fx: &mut 
     fx.redraw = true;
 }
 
+/// What comes after the heart (or after the last chapter, without it): the
+/// finale's first slide, or the question if there is no finale.
+pub(crate) fn after_trace<S: Story>(story: &S) -> Scene {
+    if story.finale_count() > 0 {
+        Scene::Finale { slide: 0 }
+    } else {
+        Scene::Question
+    }
+}
+
+/// On from finale slide `slide`: the next slide, or the question after the last.
+pub(crate) fn next_slide<S: Story>(m: &mut Model, story: &S, slide: u8, fx: &mut Effects) {
+    let next = usize::from(slide) + 1;
+    m.go(if next < story.finale_count() {
+        Scene::Finale {
+            slide: u8::try_from(next).unwrap_or(u8::MAX),
+        }
+    } else {
+        Scene::Question
+    });
+    fx.scene_changed = true;
+    fx.redraw = true;
+}
+
 /// A swipe on a story page turns it: to the left is "Next", to the right goes
 /// back a chapter, with its objects already found so she can read them again.
 /// Other scenes ignore swipes.
 pub(crate) fn on_swipe<S: Story>(m: &mut Model, story: &S, swipe: Swipe, fx: &mut Effects) {
     m.last_touch_ms = m.now_ms;
+    // In the finale a swipe flips through the slides.
+    if let Scene::Finale { slide } = m.scene {
+        match swipe {
+            Swipe::Left => next_slide(m, story, slide, fx),
+            Swipe::Right => {
+                if let Some(back) = slide.checked_sub(1) {
+                    m.go(Scene::Finale { slide: back });
+                    fx.scene_changed = true;
+                    fx.redraw = true;
+                }
+            }
+        }
+        return;
+    }
     let Scene::Story { chapter, found, .. } = m.scene else {
         return;
     };
@@ -296,7 +343,7 @@ mod tests {
     use crate::state::{
         dog_rect, Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, PET_MS, RESTART_BUTTON,
     };
-    use crate::state::{NUDGE_AFTER_MS, TRACE_ADMIRE_MS, UNLOCK_AFTER_MS};
+    use crate::state::{NUDGE_AFTER_MS, SLIDE_MIN_MS, TRACE_ADMIRE_MS, UNLOCK_AFTER_MS};
     use crate::trace::{DOTS, DOT_AT};
     use crate::{update, Event};
     use geometry::Point;
@@ -472,7 +519,7 @@ mod tests {
     }
 
     fn swipe(r: &mut Rig, s: Swipe) -> crate::Effects {
-        update(&mut r.m, &Fake, &mut r.rng, Event::Swipe(s))
+        r.send(Event::Swipe(s))
     }
 
     #[test]
@@ -668,6 +715,63 @@ mod tests {
         let t = r.m.now_ms + SLEEP_AFTER_MS * 2;
         r.tick(t);
         assert_eq!(r.m.power(r.m.now_ms), Power::Awake);
+    }
+
+    /// Plays to the finale's first slide: the chapters, then the heart.
+    fn play_to_finale(r: &mut Rig) {
+        r.play_to_question();
+        trace_heart(r);
+        let t = r.m.now_ms + TRACE_ADMIRE_MS;
+        r.tick(t);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 0 });
+    }
+
+    #[test]
+    fn the_finale_plays_slide_by_slide_then_asks() {
+        let mut r = Rig::with_finale();
+        play_to_finale(&mut r);
+        let t0 = r.m.now_ms;
+        r.tick(t0 + 4_999);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 0 }, "still reading");
+        r.tick(t0 + 5_000);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 1 }, "moves on by itself");
+        r.tick(t0 + 10_000);
+        r.tick(t0 + 15_000);
+        assert_eq!(r.m.scene, Scene::Question, "and then the question");
+    }
+
+    #[test]
+    fn a_tap_moves_the_finale_on_but_not_too_soon() {
+        let mut r = Rig::with_finale();
+        play_to_finale(&mut r);
+        let t0 = r.m.now_ms;
+        r.tap(300, 120);
+        assert_eq!(
+            r.m.scene,
+            Scene::Finale { slide: 0 },
+            "too soon after it opened"
+        );
+        r.tick(t0 + SLIDE_MIN_MS);
+        let fx = r.tap(300, 120);
+        assert!(fx.scene_changed);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 1 });
+    }
+
+    #[test]
+    fn swipes_flip_through_the_finale() {
+        let mut r = Rig::with_finale();
+        play_to_finale(&mut r);
+        swipe(&mut r, Swipe::Right);
+        assert_eq!(
+            r.m.scene,
+            Scene::Finale { slide: 0 },
+            "nothing before the first"
+        );
+        swipe(&mut r, Swipe::Left);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 1 });
+        swipe(&mut r, Swipe::Right);
+        assert_eq!(r.m.scene, Scene::Finale { slide: 0 });
+        assert_eq!(r.m.resume, Resume::Finale(0), "a power cut comes back here");
     }
 
     #[test]

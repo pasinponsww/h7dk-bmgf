@@ -31,7 +31,7 @@ use crate::fonts::{PRESS_START, VT323};
 use crate::state::{
     Model, Scene, MAX_DODGES, NEXT_BUTTON, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, SLIDESHOW_CARD,
 };
-use crate::story::{full_mask, Content, CHAPTERS, ENDING, TRACE};
+use crate::story::{full_mask, Content, CHAPTERS, ENDING, FINALE, TRACE};
 use crate::trace::{self, DOTS, DOT_AT};
 use crate::warmth::{feel, Feel};
 use crate::{Point, Rect};
@@ -50,6 +50,14 @@ const MESSAGE_DELAY_MS: u32 = 300;
 pub const FADE_MS: u32 = 450;
 /// How long the heart wipe takes to open a new scene.
 pub const WIPE_MS: u32 = 700;
+/// How long a finale slide takes to fade in over the last.
+const SLIDE_FADE_MS: u32 = 450;
+/// Where a finale photo's polaroid rests: on the right, a white frame round
+/// a 160 x 160 photo.
+const FINALE_CARD: Rect = Rect::new(284, 20, 176, 196);
+/// The finale's words: the left side when there is a photo, else most of
+/// the width, kept clear of the dog in the corner.
+const FINALE_TEXT_LEFT: i32 = 24;
 /// How long a polaroid takes to drop into place.
 const DROP_MS: u32 = 350;
 /// How long its photo then takes to develop from a blank.
@@ -87,10 +95,15 @@ pub const DIM_OPACITY: u8 = 90;
 /// whenever the story goes back to the beginning. The other scenes open with
 /// the heart wipe instead.
 pub fn opacity(model: &Model, t_ms: u32) -> u8 {
+    let since = t_ms.wrapping_sub(model.scene_start_ms);
+    // Finale slides after the first fade in quickly, one into the next.
+    if matches!(model.scene, Scene::Finale { slide } if slide > 0) {
+        let p = since.min(SLIDE_FADE_MS) * 255 / SLIDE_FADE_MS;
+        return u8::try_from(p).unwrap_or(u8::MAX);
+    }
     if model.scene != Scene::Intro {
         return u8::MAX;
     }
-    let since = t_ms.wrapping_sub(model.scene_start_ms);
     if since >= FADE_MS {
         return u8::MAX;
     }
@@ -191,6 +204,11 @@ fn mood(model: &Model, t_ms: u32) -> Mood {
             .get(usize::from(chapter))
             .and_then(|c| Mood::from_name(c.mood))
             .unwrap_or(Mood::Idle),
+        // Listening to the finale: shy over the words, happy over the photos.
+        Scene::Finale { slide } => match FINALE.get(usize::from(slide)) {
+            Some(s) if s.photo.is_some() => Mood::Happy,
+            _ => Mood::Shy,
+        },
         // Watching her draw, then in love once the heart is done.
         Scene::Trace { .. } if model.traced_ms.is_some() => Mood::Love,
         Scene::Trace { .. } => Mood::Wow,
@@ -334,6 +352,7 @@ impl Painter {
                 shown,
             } => self.story(target, chapter, found, shown)?,
             Scene::Trace { hit } => self.trace(target, hit)?,
+            Scene::Finale { slide } => self.finale(target, slide)?,
             Scene::Question => self.question(target)?,
             Scene::Celebration => self.celebration(target)?,
         }
@@ -355,7 +374,10 @@ impl Painter {
     /// scene landed (or the middle of the screen), slowly at first and then
     /// quickly, until it covers the whole screen.
     fn wipe(&self) -> Option<(GPoint, i32)> {
-        if self.model.scene == Scene::Intro {
+        // The intro fades in instead, and so do finale slides after the first.
+        if self.model.scene == Scene::Intro
+            || matches!(self.model.scene, Scene::Finale { slide } if slide > 0)
+        {
             return None;
         }
         let since = self.since();
@@ -753,6 +775,101 @@ impl Painter {
             shadow(target, NEXT_BUTTON, 12)?;
             rounded(target, NEXT_BUTTON, 12, theme::ICON, None)?;
             label(target, NEXT_BUTTON, "Next>", theme::ON_ICON)?;
+        }
+        Ok(())
+    }
+
+    /// One slide of the finale. With a photo: the polaroid drops in on the
+    /// right and develops while the sentence types itself out on the left.
+    /// Without: the sentence alone, big, in the pixel font. Dots along the
+    /// bottom show how far through the finale she is.
+    fn finale<D>(&self, target: &mut D, slide: u8) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let Some(s) = FINALE.get(usize::from(slide)) else {
+            return Ok(());
+        };
+        let since = self.since();
+        // The first slide opens with the heart wipe, the others fade in.
+        let opening = if slide == 0 { WIPE_MS } else { SLIDE_FADE_MS };
+        let shown = |after: u32| since.checked_sub(opening + after).map_or(0, typed);
+        let typing = |shown, font, scale, step| Typing {
+            shown,
+            font,
+            scale,
+            color: theme::TEXT,
+            step,
+            t_ms: self.t_ms,
+        };
+        match s.photo {
+            Some(photo) => {
+                polaroid_at(
+                    target,
+                    FINALE_CARD,
+                    photo,
+                    "",
+                    since.saturating_sub(opening),
+                )?;
+                // 31 characters of VT323 fill the left side.
+                let lines = wrap(s.line, 31).count();
+                let top = 104 - to_i32(lines) * 11;
+                typing(shown(DROP_MS), &VT323, 1, 22).draw(
+                    target,
+                    wrap(s.line, 31).take(7),
+                    Align::Left(FINALE_TEXT_LEFT),
+                    top,
+                )?;
+            }
+            None => {
+                // Big when it fits in five lines of 26, else the tall VT323.
+                let center = (FINALE_TEXT_LEFT + 456) / 2;
+                if wrap(s.line, 26).count() <= 5 {
+                    let lines = to_i32(wrap(s.line, 26).count());
+                    typing(shown(0), &PRESS_START, 2, 26).draw(
+                        target,
+                        wrap(s.line, 26).take(5),
+                        Align::Center(center),
+                        112 - lines * 13,
+                    )?;
+                } else {
+                    let lines = to_i32(wrap(s.line, 50).count());
+                    typing(shown(0), &VT323, 1, 22).draw(
+                        target,
+                        wrap(s.line, 50).take(7),
+                        Align::Center(center),
+                        112 - lines * 11,
+                    )?;
+                }
+            }
+        }
+        self.finale_dots(target, slide)
+    }
+
+    /// One small dot per finale slide along the bottom right: done ones in
+    /// pink, this one in deep pink and bigger, the rest as rings.
+    fn finale_dots<D>(&self, target: &mut D, slide: u8) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let count = to_i32(FINALE.len());
+        let step = (330 / count.max(1)).clamp(6, 12);
+        let right = 466;
+        let y = 254;
+        for i in 0..count {
+            let x = right - (count - i) * step;
+            let current = i == i32::from(slide);
+            let (d, style) = if current {
+                (8, PrimitiveStyle::with_fill(theme::ICON))
+            } else if i < i32::from(slide) {
+                (5, PrimitiveStyle::with_fill(theme::TILE))
+            } else {
+                (5, PrimitiveStyle::with_stroke(theme::MAUVE, 1))
+            };
+            let off = (8 - to_i32_u(d)) / 2;
+            Circle::new(GPoint::new(x + off, y + off), d)
+                .into_styled(style)
+                .draw(target)?;
         }
         Ok(())
     }
@@ -1178,7 +1295,8 @@ where
     photo.draw(target, GPoint::new(x + 8, y + 8), developed(age))?;
     let cx = x + i32::from(card.w) / 2;
     if !caption.is_empty() {
-        let at = GPoint::new(cx - text_width(caption, &VT323) / 2, y + 8 + 128 + 6);
+        let below = y + 8 + i32::from(photo.size) + 6;
+        let at = GPoint::new(cx - text_width(caption, &VT323) / 2, below);
         font_text(target, caption, at, &VT323, 1, theme::TEXT)?;
     }
     let tape = Rectangle::new(GPoint::new(cx - 24, y - 7), Size::new(48, 15));
@@ -1643,6 +1761,10 @@ mod tests {
     use crate::common::testing::Rig;
     use crate::{update, Event, Story, TouchEvent, XorShift32};
 
+    fn to_u8(v: usize) -> u8 {
+        u8::try_from(v).unwrap()
+    }
+
     fn full_frame(p: &Painter) -> Vec<u16> {
         let mut buf = vec![0u16; WIDTH * HEIGHT];
         p.draw(&mut Band::new(&mut buf, 0)).unwrap();
@@ -1715,6 +1837,15 @@ mod tests {
         out.push((m, cues));
         let done = m.now_ms + crate::state::TRACE_ADMIRE_MS;
         send(&mut m, &mut cues, Event::Tick { now_ms: done });
+        // The finale: keep a slide with a photo and one without, play the rest.
+        for i in 0..story.finale_count() {
+            assert_eq!(m.scene, Scene::Finale { slide: to_u8(i) });
+            if i < 3 {
+                out.push((m, cues));
+            }
+            let next = m.now_ms + story.slide_ms(i);
+            send(&mut m, &mut cues, Event::Tick { now_ms: next });
+        }
         assert_eq!(m.scene, Scene::Question);
         out.push((m, cues));
         let no = m.no_rect;

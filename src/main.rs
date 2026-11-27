@@ -66,6 +66,8 @@ fn next_tap(model: &Model, story: &Content) -> Point {
             }
             _ => center(NEXT_BUTTON),
         },
+        // The middle of the slide, which moves the finale on.
+        Scene::Finale { .. } => Point::new(240, 120),
         Scene::Question => center(model.yes_rect()),
         Scene::Celebration => center(RESTART_BUTTON),
     }
@@ -85,6 +87,7 @@ fn log_scene(model: &Model) {
             "scene: trace the heart, {} dots",
             (hit & app::trace::ALL).count_ones()
         ),
+        Scene::Finale { slide } => defmt::info!("scene: finale, slide {}", slide + 1),
         Scene::Question => defmt::info!("scene: question"),
         Scene::Celebration => defmt::info!("scene: celebration"),
     }

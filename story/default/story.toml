@@ -58,6 +58,87 @@ no_labels = ["No", "Wait, no", "Sure?", "Error 404", "Really?", "Okay, yes"]
 enabled = true
 prompt = "Draw a heart for me"
 
+# The finale: after the heart is drawn and before the question, these
+# slides play one after another (tap to move on, swipe to go back).
+# A slide is a sentence, with or without a photo. Photos are shown big
+# (160 x 160, about 50 KB of the chip's flash each, 14 different ones at most).
+# Each slide stays long enough to read it; this one takes about 3.5 minutes.
+# The photo lines all point at the placeholder: give each its own picture.
+[[finale]]
+line = "Before I ask you something, I want to tell you a few things."
+
+[[finale]]
+photo = "photo.png"            # photo 1 of 12
+line = "This is one of my favourite days with you. I still think about it."
+
+[[finale]]
+line = "I don't think you know how much brighter my days are since you came along."
+
+[[finale]]
+photo = "photo.png"            # photo 2 of 12
+line = "You turn ordinary days into little adventures."
+
+[[finale]]
+photo = "photo.png"            # photo 3 of 12
+line = "You listen to me, even when I ramble about nothing at all."
+
+[[finale]]
+line = "You're kind, even when nobody is watching. I notice."
+
+[[finale]]
+photo = "photo.png"            # photo 4 of 12
+line = "You make me laugh until my face hurts."
+
+[[finale]]
+photo = "photo.png"            # photo 5 of 12
+line = "You're patient with me, and I never take that for granted."
+
+[[finale]]
+line = "When something good happens, you're the first person I want to tell."
+
+[[finale]]
+photo = "photo.png"            # photo 6 of 12
+line = "And when things go wrong, you're the one I want next to me."
+
+[[finale]]
+photo = "photo.png"            # photo 7 of 12
+line = "I love the way you see the world."
+
+[[finale]]
+line = "I want to keep learning everything about you, one day at a time."
+
+[[finale]]
+photo = "photo.png"            # photo 8 of 12
+line = "I want more days like this one."
+
+[[finale]]
+photo = "photo.png"            # photo 9 of 12
+line = "More quiet evenings, more silly jokes, more late-night talks."
+
+[[finale]]
+line = "I promise to respect you, to listen to you, and to always be honest with you."
+
+[[finale]]
+photo = "photo.png"            # photo 10 of 12
+line = "I'll cheer for your dreams as loudly as I can."
+
+[[finale]]
+photo = "photo.png"            # photo 11 of 12
+line = "And I'll be there on the hard days too, not just the easy ones."
+
+[[finale]]
+line = "I've thought about this for a long time."
+
+[[finale]]
+photo = "photo.png"            # photo 12 of 12
+line = "And every time, the answer is the same: it's you."
+
+[[finale]]
+line = "So I made you this little thing, one pixel at a time."
+
+[[finale]]
+line = "There's just one question left..."
+
 [celebration]
 title = "You said yes"
 message = "best day ever"

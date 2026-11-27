@@ -165,6 +165,62 @@ fn secret_code(doc: &toml::Table) -> String {
     )
 }
 
+/// Finale photos are baked at this many pixels square (50 KB of flash each).
+const FINALE_PX: u32 = 160;
+/// The most different photos the finale may use: they live in the chip's
+/// own flash, which holds about this many next to the firmware.
+const MAX_FINALE_PHOTOS: usize = 14;
+/// The most slides the finale may have.
+const MAX_SLIDES: usize = 40;
+
+/// The `[[finale]]` slides: sentences, some with a photo, that play between
+/// the drawn heart and the question. A photo used on several slides is
+/// baked once.
+fn finale_code(doc: &toml::Table, dir: &Path, out: &Path) -> String {
+    let slides: &[toml::Value] = doc
+        .get("finale")
+        .and_then(toml::Value::as_array)
+        .map_or(&[], Vec::as_slice);
+    if slides.len() > MAX_SLIDES {
+        fail(&format!(
+            "the finale has {} slides, the limit is {MAX_SLIDES}",
+            slides.len()
+        ));
+    }
+    let mut photos: BTreeMap<String, String> = BTreeMap::new();
+    let mut statics = String::new();
+    let mut rows = String::new();
+    for (i, slide) in slides.iter().enumerate() {
+        let label = format!("finale slide {}", i + 1);
+        let table = slide
+            .as_table()
+            .unwrap_or_else(|| fail(&format!("{label} is not a table")));
+        let line = limited(table, "line", MAX_LINE, &label)
+            .unwrap_or_else(|| fail(&format!("{label} needs a line")));
+        let photo = match text(table, "photo") {
+            Some(file) => {
+                if !photos.contains_key(file) {
+                    if photos.len() == MAX_FINALE_PHOTOS {
+                        fail(&format!(
+                            "{label}: the finale may use {MAX_FINALE_PHOTOS} different photos at most (they live in the chip's flash)"
+                        ));
+                    }
+                    let ident = format!("FINALE_PHOTO_{}", photos.len() + 1);
+                    statics.push_str(&bake_photo_at(dir, out, file, &label, &ident, FINALE_PX));
+                    photos.insert(file.to_string(), ident);
+                }
+                format!("Some(&{})", photos[file])
+            }
+            None => "None".to_string(),
+        };
+        writeln!(rows, "    Slide {{ line: {line:?}, photo: {photo} }},").unwrap();
+    }
+    format!(
+        "{statics}/// The finale: slides between the drawn heart and the question.\npub static FINALE: [Slide; {}] = [\n{rows}];\n",
+        slides.len()
+    )
+}
+
 /// The optional `[trace]` table: the trace-a-heart game before the question.
 fn trace_code(doc: &toml::Table) -> String {
     let empty = toml::Table::new();
@@ -516,6 +572,18 @@ fn dither_rgb565(rgb: &[[u8; 3]], w: usize, h: usize) -> Vec<u16> {
 /// cut to a centered square, shrunk to [`PHOTO_PX`] and dithered to RGB565,
 /// low byte first. Returns the Rust static that holds it.
 fn bake_photo(story_dir: &Path, out: &Path, file: &str, label: &str, ident: &str) -> String {
+    bake_photo_at(story_dir, out, file, label, ident, PHOTO_PX)
+}
+
+/// [`bake_photo`] at `side` pixels square.
+fn bake_photo_at(
+    story_dir: &Path,
+    out: &Path,
+    file: &str,
+    label: &str,
+    ident: &str,
+    side: u32,
+) -> String {
     let path = story_dir.join(file);
     println!("cargo:rerun-if-changed={}", path.display());
     let img = image::open(&path)
@@ -527,17 +595,12 @@ fn bake_photo(story_dir: &Path, out: &Path, file: &str, label: &str, ident: &str
         })
         .to_rgb8();
     let (w, h) = img.dimensions();
-    let side = w.min(h);
+    let crop = w.min(h);
     let square =
-        image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
-    let small = image::imageops::resize(
-        &square,
-        PHOTO_PX,
-        PHOTO_PX,
-        image::imageops::FilterType::Lanczos3,
-    );
+        image::imageops::crop_imm(&img, (w - crop) / 2, (h - crop) / 2, crop, crop).to_image();
+    let small = image::imageops::resize(&square, side, side, image::imageops::FilterType::Lanczos3);
     let rgb: Vec<[u8; 3]> = small.pixels().map(|p| p.0).collect();
-    let px = dither_rgb565(&rgb, PHOTO_PX as usize, PHOTO_PX as usize);
+    let px = dither_rgb565(&rgb, side as usize, side as usize);
     let bytes: Vec<u8> = px.iter().flat_map(|v| v.to_le_bytes()).collect();
     let dir = out.join("photos");
     fs::create_dir_all(&dir).expect("could not create the photo folder");
@@ -545,7 +608,7 @@ fn bake_photo(story_dir: &Path, out: &Path, file: &str, label: &str, ident: &str
     fs::write(&bin, bytes).expect("could not write a photo");
     let bin = bin.display().to_string();
     format!(
-        "static {ident}: ui::photo::Photo = ui::photo::Photo::new({PHOTO_PX}, include_bytes!({bin:?}));\n"
+        "static {ident}: ui::photo::Photo = ui::photo::Photo::new({side}, include_bytes!({bin:?}));\n"
     )
 }
 
@@ -667,6 +730,7 @@ fn write_story_table(root: &Path, out: &Path) {
     }
     writeln!(code, "];\n").unwrap();
     code.push_str(&photos);
+    code.push_str(&finale_code(&doc, &dir, out));
     code.push_str(&ending_code(&doc));
     code.push_str(&trace_code(&doc));
     code.push_str(&secret_code(&doc));

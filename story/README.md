@@ -37,6 +37,10 @@ no_labels = ["No", "Wait, no", "Sure?", "Error 404", "Really?", "Okay, yes"]
 enabled = true               # draw a heart before the question (false skips it)
 prompt = "Draw a heart for me"   # up to 40 characters
 
+[[finale]]                   # optional, up to 40: slides after the heart,
+photo = "us-at-the-beach.jpg" # before the question (photo optional, 160 x 160,
+line = "Up to 160 characters." # 14 different photos at most)
+
 [celebration]                # the whole table is optional
 title = "You said yes"
 message = "best day ever"

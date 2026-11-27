@@ -31,7 +31,7 @@ pub(crate) fn on_tick<S: Story>(m: &mut Model, story: &S, fx: &mut Effects) {
             if let Some(admired) = m.traced_for(m.now_ms) {
                 // The finished heart has had its moment: on to the question.
                 if admired >= TRACE_ADMIRE_MS {
-                    m.go(Scene::Question);
+                    m.go(super::touch::after_trace(story));
                     fx.scene_changed = true;
                     fx.redraw = true;
                 }
@@ -44,6 +44,13 @@ pub(crate) fn on_tick<S: Story>(m: &mut Model, story: &S, fx: &mut Effects) {
             if idle > UNLOCK_AFTER_MS && !m.skip_ok {
                 m.skip_ok = true;
                 fx.redraw = true;
+            }
+        }
+        Scene::Finale { slide } => {
+            // Each slide moves on by itself once it has been read.
+            let since = m.now_ms.wrapping_sub(m.scene_start_ms);
+            if since >= story.slide_ms(usize::from(slide)) {
+                super::touch::next_slide(m, story, slide, fx);
             }
         }
         Scene::Celebration => {

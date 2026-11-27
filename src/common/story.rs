@@ -21,6 +21,32 @@ pub trait Story {
         let _ = chapter;
         false
     }
+    /// Slides in the finale, between the drawn heart and the question.
+    fn finale_count(&self) -> usize {
+        0
+    }
+    /// How long finale slide `i` stays before the next one comes by itself.
+    fn slide_ms(&self, i: usize) -> u32 {
+        let _ = i;
+        0
+    }
+}
+
+/// One slide of the finale: a sentence, with or without a photo.
+#[derive(Copy, Clone, Debug)]
+pub struct Slide {
+    /// The sentence, typed out on the slide.
+    pub line: &'static str,
+    /// A photo shown as a polaroid next to it.
+    pub photo: Option<&'static Photo>,
+}
+
+/// How long a slide with `line` stays: time to type it (28 ms a character),
+/// then to read it (about 60 ms a character, and three and a half seconds
+/// more to take it in), plus three seconds for a photo to develop.
+pub fn slide_ms(line: &str, photo: bool) -> u32 {
+    let chars = u32::try_from(line.chars().count()).unwrap_or(u32::MAX / 100);
+    3_500 + chars * 90 + if photo { 3_000 } else { 0 }
 }
 
 /// Mask with one bit set for each of `n` objects.
@@ -160,11 +186,19 @@ impl Story for Content {
     fn has_photo(&self, chapter: usize) -> bool {
         CHAPTERS.get(chapter).is_some_and(|c| c.photo.is_some())
     }
+    fn finale_count(&self) -> usize {
+        FINALE.len()
+    }
+    fn slide_ms(&self, i: usize) -> u32 {
+        FINALE
+            .get(i)
+            .map_or(0, |s| slide_ms(s.line, s.photo.is_some()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{full_mask, Content, Story, CHAPTERS, ENDING};
+    use super::{full_mask, Content, Story, CHAPTERS, ENDING, FINALE};
     use crate::state::{NEXT_BUTTON, SCREEN_H, SCREEN_W};
     use crate::{update, Event, Model, Point, Scene, TouchEvent, XorShift32};
 
@@ -241,6 +275,26 @@ mod tests {
                 assert!(outline > size, "{}: {} has no outline", c.title, h.icon);
                 assert!(fill > size, "{}: {} has no fill", c.title, h.icon);
             }
+        }
+    }
+
+    #[test]
+    fn the_default_finale_takes_three_to_four_minutes() {
+        let story = Content;
+        let total: u32 = (0..story.finale_count()).map(|i| story.slide_ms(i)).sum();
+        assert!((180_000..=240_000).contains(&total), "{} s", total / 1_000);
+    }
+
+    #[test]
+    fn every_photo_is_baked_at_its_size() {
+        let photos = CHAPTERS
+            .iter()
+            .filter_map(|c| c.photo)
+            .map(|p| (p, 128))
+            .chain(FINALE.iter().filter_map(|s| s.photo).map(|p| (p, 160)));
+        for (p, side) in photos {
+            assert_eq!(p.size, side);
+            assert_eq!(p.px.len(), usize::from(side) * usize::from(side) * 2);
         }
     }
 
@@ -328,6 +382,17 @@ mod tests {
                 send(&mut m, Event::Touch(TouchEvent::Move(Point::new(x, y))));
             }
             let now = m.now_ms + crate::state::TRACE_ADMIRE_MS;
+            send(&mut m, Event::Tick { now_ms: now });
+        }
+        // Let the finale play to its end, slide by slide.
+        for i in 0..story.finale_count() {
+            assert_eq!(
+                m.scene,
+                Scene::Finale {
+                    slide: u8::try_from(i).unwrap()
+                }
+            );
+            let now = m.now_ms + story.slide_ms(i);
             send(&mut m, Event::Tick { now_ms: now });
         }
         assert_eq!(m.scene, Scene::Question);

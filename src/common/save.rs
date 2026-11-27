@@ -22,6 +22,8 @@ pub enum Resume {
     Chapter(u8),
     /// At the question (after the last chapter).
     Question,
+    /// At this slide of the finale (zero-based).
+    Finale(u8),
 }
 
 /// What is saved.
@@ -51,6 +53,7 @@ impl Progress {
             Resume::Start => (0, 0),
             Resume::Chapter(c) => (1, c),
             Resume::Question => (2, 0),
+            Resume::Finale(s) => (3, s),
         };
         r[12] = kind;
         r[13] = chapter;
@@ -69,6 +72,7 @@ impl Progress {
             (0, _) => Resume::Start,
             (1, c) => Resume::Chapter(c),
             (2, _) => Resume::Question,
+            (3, s) => Resume::Finale(s),
             _ => return None,
         };
         Some((
@@ -132,7 +136,12 @@ mod tests {
 
     #[test]
     fn a_record_reads_back() {
-        for resume in [Resume::Start, Resume::Chapter(3), Resume::Question] {
+        for resume in [
+            Resume::Start,
+            Resume::Chapter(3),
+            Resume::Question,
+            Resume::Finale(7),
+        ] {
             let p = Progress {
                 resume,
                 yes_count: 7,
