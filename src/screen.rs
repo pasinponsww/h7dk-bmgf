@@ -24,7 +24,9 @@ use ui::mascot::{self, Mood};
 use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
-use crate::state::{Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W};
+use crate::state::{
+    dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W,
+};
 use crate::story::{full_mask, Content, CHAPTERS, ENDING};
 use crate::{Point, Rect};
 
@@ -64,7 +66,7 @@ const INTRO_TITLE: &str = "For you";
 /// Label of the intro button.
 const INTRO_BUTTON: &str = "Open";
 /// Small line under the intro button.
-const INTRO_HINT: &str = "tap anywhere";
+const INTRO_HINT: &str = "tap to open, or pet me";
 /// Label of the button that goes back to the intro.
 const RESTART_LABEL: &str = "Start again";
 /// The card under the dog that shows the revealed line, in the bottom-left
@@ -147,12 +149,8 @@ fn mood(model: &Model) -> Mood {
 
 /// Where the dog sits in each scene, and how big each sprite pixel is.
 fn dog_place(scene: Scene) -> (GPoint, u32) {
-    match scene {
-        Scene::Intro => (GPoint::new(40, 56), 4),
-        Scene::Story { .. } => (GPoint::new(74, 72), 3),
-        Scene::Question => (GPoint::new(396, 14), 2),
-        Scene::Celebration => (GPoint::new(36, 56), 4),
-    }
+    let (x, y, scale) = dog_spot(scene);
+    (GPoint::new(i32::from(x), i32::from(y)), u32::from(scale))
 }
 
 /// Draws whole frames. Holds the parts of a frame that are worked out once
@@ -190,7 +188,12 @@ impl Painter {
         self.t_ms = t_ms;
         backdrop::render(t_ms, &mut self.glyphs);
         let since = t_ms.wrapping_sub(model.scene_start_ms);
-        mascot::render(&mascot::pose(mood(model), since), &mut self.dog);
+        let pose = match model.petted_for(t_ms) {
+            // Petted: heart eyes and a fast wag for a moment.
+            Some(petted) => mascot::pose(Mood::Love, petted),
+            None => mascot::pose(mood(model), since),
+        };
+        mascot::render(&pose, &mut self.dog);
     }
 
     /// Draws the prepared frame. Only the part inside the target's bounding
@@ -214,6 +217,7 @@ impl Painter {
         }
         let (at, scale) = dog_place(self.model.scene);
         self.draw_dog(target, at, scale)?;
+        self.pet_hearts(target)?;
         self.ripple(target)?;
         if let Some((center, size)) = self.wipe() {
             heart_shape::fill_outside(target, center, size, theme::TILE)?;
@@ -589,6 +593,38 @@ impl Painter {
             Some((theme::ICON, 3)),
         )?;
         label(target, RESTART_BUTTON, RESTART_LABEL, theme::ICON)
+    }
+
+    /// Small hearts that pop out of the dog's head and float up after a pet,
+    /// one after another, spreading out as they rise.
+    fn pet_hearts<D>(&self, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        const HEARTS: u32 = 6;
+        const EACH_MS: u32 = 1_100;
+        let Some(age) = self.model.petted_for(self.t_ms) else {
+            return Ok(());
+        };
+        let dog = dog_rect(self.model.scene);
+        let (_, _, scale) = dog_spot(self.model.scene);
+        let size = u32::from(scale.max(2)) - 1;
+        let cx = i32::from(dog.x) + i32::from(dog.w) / 2;
+        let head = i32::from(dog.y) + i32::from(dog.h) / 6;
+        for k in 0..HEARTS {
+            let Some(a) = age.checked_sub(k * 110).filter(|a| *a < EACH_MS) else {
+                continue;
+            };
+            let a = to_i32_u(a);
+            // Alternate sides, further out each time, drifting outwards.
+            let side = if k % 2 == 0 { -1 } else { 1 };
+            let spread = side * (6 + to_i32_u(k) * 5);
+            let x = cx + spread + spread * a / 900 - to_i32_u(5 * size) / 2;
+            let y = head - a * 70 / 1_000;
+            let color = if a < 700 { theme::HEART } else { theme::TILE };
+            heart(target, GPoint::new(x, y), size, color)?;
+        }
+        Ok(())
     }
 
     fn ripple<D>(&self, target: &mut D) -> Result<(), D::Error>
@@ -1259,6 +1295,27 @@ mod tests {
         assert_eq!(at_start, WIDTH * HEIGHT, "nothing shows at first");
         assert!(half_way < at_start && half_way > done, "{half_way}");
         assert!(done < WIDTH * HEIGHT / 10, "the wipe is gone: {done}");
+    }
+
+    #[test]
+    fn a_petted_dog_gets_heart_eyes_and_hearts_float_up() {
+        let mut r = Rig::new();
+        r.tick(FADE_MS);
+        let dog = crate::state::dog_rect(Scene::Intro);
+        let mut p = Painter::new();
+        let mut hearts = |m: &Model, t: u32| {
+            p.prepare(m, &Cues::new(), t);
+            count(&full_frame(&p), theme::HEART)
+        };
+        let before = hearts(&r.m, r.m.now_ms + 400);
+        r.tap_rect(dog);
+        let petted = hearts(&r.m, r.m.now_ms + 400);
+        assert!(
+            petted > before + 50,
+            "heart eyes and hearts: {before} -> {petted}"
+        );
+        let after = hearts(&r.m, r.m.now_ms + crate::state::PET_MS + 400);
+        assert_eq!(after, before, "back to normal once the love wears off");
     }
 
     #[test]

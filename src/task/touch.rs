@@ -6,8 +6,8 @@ use rng::Rng;
 
 use crate::event::Effects;
 use crate::state::{
-    Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON, NO_AREA,
-    RESTART_BUTTON, SCREEN_W, YES_PAD,
+    dog_rect, Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
+    NO_AREA, RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 
@@ -28,6 +28,7 @@ pub(crate) fn on_down<S: Story, R: Rng>(
     m.last_touch_ms = m.now_ms;
     fx.ripple = Some(p);
     match m.scene {
+        Scene::Intro if dog_rect(m.scene).contains(p) => pet(m, fx),
         Scene::Intro => {
             m.go(Scene::Story {
                 chapter: 0,
@@ -42,9 +43,19 @@ pub(crate) fn on_down<S: Story, R: Rng>(
         Scene::Celebration => {
             if RESTART_BUTTON.contains(p) {
                 restart(m, fx);
+            } else if dog_rect(m.scene).contains(p) {
+                pet(m, fx);
             }
         }
     }
+}
+
+/// The dog was petted: it falls in love for a moment and both LEDs flash.
+fn pet(m: &mut Model, fx: &mut Effects) {
+    m.petted_ms = Some(m.now_ms);
+    m.flash_until_ms = m.now_ms.wrapping_add(FLASH_MS);
+    fx.petted = true;
+    fx.redraw = true;
 }
 
 /// Back to the intro, as if the board had just started.
@@ -102,6 +113,11 @@ fn story_touch<S: Story>(
         }
         fx.scene_changed = true;
         fx.redraw = true;
+        return;
+    }
+
+    if dog_rect(m.scene).contains(p) {
+        pet(m, fx);
     }
     // Anything else is a miss: the ripple is the only feedback.
 }
@@ -110,6 +126,11 @@ fn question_touch<R: Rng>(m: &mut Model, rng: &mut R, p: Point, fx: &mut Effects
     // YES always wins, wherever and whenever.
     if m.yes_rect().contains(p) {
         celebrate(m, fx);
+        return;
+    }
+    // Petting the dog in the corner is not a try at NO.
+    if dog_rect(m.scene).contains(p) {
+        pet(m, fx);
         return;
     }
     // Once NO has given up it stops moving and becomes "Okay, yes".
@@ -148,7 +169,9 @@ fn celebrate(m: &mut Model, fx: &mut Effects) {
 #[cfg(test)]
 mod tests {
     use crate::common::testing::{story_state, Fake, Rig, CH0};
-    use crate::state::{Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, RESTART_BUTTON};
+    use crate::state::{
+        dog_rect, Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, PET_MS, RESTART_BUTTON,
+    };
     use crate::{update, Event};
     use geometry::Point;
 
@@ -317,8 +340,66 @@ mod tests {
         r.play_to_question();
         let yes = r.m.yes_rect();
         r.tap_rect(yes);
-        let fx = r.tap(100, 100);
+        let fx = r.tap(330, 100);
         assert!(!fx.redraw && !fx.scene_changed);
         assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    #[test]
+    fn petting_the_dog_on_the_intro_does_not_open_the_story() {
+        let mut r = Rig::new();
+        let fx = r.tap_rect(dog_rect(Scene::Intro));
+        assert!(fx.petted && !fx.scene_changed);
+        assert_eq!(r.m.scene, Scene::Intro);
+        assert_eq!(fx.leds, (255, 255), "both LEDs flash");
+        assert_eq!(r.m.petted_for(r.m.now_ms), Some(0));
+    }
+
+    #[test]
+    fn petting_the_dog_on_a_story_page_keeps_the_page() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        r.tap_rect(CH0[0]);
+        let fx = r.tap_rect(dog_rect(r.m.scene));
+        assert!(fx.petted && fx.redraw);
+        assert_eq!(
+            story_state(&r.m),
+            (0, 0b01, Some(0)),
+            "the page is unchanged"
+        );
+    }
+
+    #[test]
+    fn the_dog_in_the_corner_is_not_a_try_at_no() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let no = r.m.no_rect;
+        let fx = r.tap_rect(dog_rect(Scene::Question));
+        assert!(fx.petted && !fx.dodged);
+        assert_eq!((r.m.dodges, r.m.no_rect), (0, no));
+    }
+
+    #[test]
+    fn the_dog_can_be_petted_on_the_celebration_too() {
+        let mut r = Rig::new();
+        r.play_to_question();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let fx = r.tap_rect(dog_rect(Scene::Celebration));
+        assert!(fx.petted);
+        assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    #[test]
+    fn the_love_wears_off_and_a_new_scene_forgets_it() {
+        let mut r = Rig::new();
+        r.tap_rect(dog_rect(Scene::Intro));
+        r.tick(PET_MS - 1);
+        assert_eq!(r.m.petted_for(r.m.now_ms), Some(PET_MS - 1));
+        r.tick(PET_MS);
+        assert_eq!(r.m.petted_for(r.m.now_ms), None, "worn off");
+        r.tap_rect(dog_rect(Scene::Intro));
+        r.tap(300, 30);
+        assert_eq!(r.m.petted_for(r.m.now_ms), None, "the story starts fresh");
     }
 }

@@ -40,6 +40,29 @@ pub const NO_AREA: Rect = Rect::new(10, 104, 460, 158);
 pub const YES_PAD: i16 = 24;
 /// How many random spots NO tries on each jump.
 pub const JUMP_TRIES: usize = 64;
+/// How long the dog stays in love after being petted.
+pub const PET_MS: u32 = 1_800;
+/// The dog sprite's size in sprite pixels (see `ui::mascot`).
+const DOG_W: i16 = 34;
+const DOG_H: i16 = 40;
+
+/// Where the dog sits in a scene: its top-left corner and how many screen
+/// pixels wide each sprite pixel is.
+pub const fn dog_spot(scene: Scene) -> (i16, i16, u8) {
+    match scene {
+        Scene::Intro => (40, 56, 4),
+        Scene::Story { .. } => (74, 72, 3),
+        Scene::Question => (396, 14, 2),
+        Scene::Celebration => (36, 56, 4),
+    }
+}
+
+/// The part of the screen the dog covers in a scene: tapping it pets the dog.
+pub const fn dog_rect(scene: Scene) -> Rect {
+    let (x, y, scale) = dog_spot(scene);
+    let s = scale as i16;
+    Rect::new(x, y, DOG_W * s, DOG_H * s)
+}
 
 /// The screen the user is on.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -78,6 +101,8 @@ pub struct Model {
     pub(crate) last_touch_ms: u32,
     pub(crate) last_nudge_ms: u32,
     pub(crate) flash_until_ms: u32,
+    /// When the dog was last petted, while it is still happy about it.
+    pub(crate) petted_ms: Option<u32>,
 }
 
 impl Model {
@@ -93,6 +118,7 @@ impl Model {
             last_touch_ms: now_ms,
             last_nudge_ms: now_ms,
             flash_until_ms: 0,
+            petted_ms: None,
         }
     }
 
@@ -104,6 +130,7 @@ impl Model {
         self.last_nudge_ms = self.now_ms;
         self.skip_ok = false;
         self.flash_until_ms = 0;
+        self.petted_ms = None;
         if scene == Scene::Question {
             self.dodges = 0;
             self.no_rect = INITIAL_NO;
@@ -113,6 +140,13 @@ impl Model {
     /// Where the YES button is. It grows 6% per dodge, up to 150%.
     pub fn yes_rect(&self) -> Rect {
         yes_rect(self.dodges)
+    }
+
+    /// Milliseconds since the dog was petted, while it is still in love
+    /// (less than [`PET_MS`] ago).
+    pub fn petted_for(&self, now_ms: u32) -> Option<u32> {
+        let since = now_ms.wrapping_sub(self.petted_ms?);
+        (since < PET_MS).then_some(since)
     }
 
     /// True once the NO button has stopped running away.

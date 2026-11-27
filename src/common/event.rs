@@ -50,4 +50,6 @@ pub struct Effects {
     pub scene_changed: bool,
     /// The NO button just jumped to a new place.
     pub dodged: bool,
+    /// The dog was just petted.
+    pub petted: bool,
 }
