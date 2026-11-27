@@ -66,6 +66,11 @@ pub(crate) fn on_down<S: Story, R: Rng>(
     }
 }
 
+/// The finger lifted: the next touch starts a new stroke.
+pub(crate) fn on_up(m: &mut Model) {
+    m.pen = None;
+}
+
 /// The finger moved while down. Only tracing the heart cares.
 pub(crate) fn on_move(m: &mut Model, p: Point, fx: &mut Effects) {
     if let Scene::Trace { hit } = m.scene {

@@ -21,6 +21,10 @@ use stm32h7xx_hal::{pac, prelude::*};
 pub const LCD_WIDTH: usize = 480;
 pub const LCD_HEIGHT: usize = 272;
 pub const LCD_PIXELS: usize = LCD_WIDTH * LCD_HEIGHT;
+/// Width and height of the sticker on the LCD controller's second layer.
+pub const STICKER_SIZE: u16 = 48;
+/// Pixels in the sticker (ARGB4444, two bytes each).
+pub const STICKER_PIXELS: usize = STICKER_SIZE as usize * STICKER_SIZE as usize;
 
 pub struct Board {
     pub leds: Leds,
@@ -256,6 +260,10 @@ pub const SCAN_LINE_NS: u32 = ((PANEL.h_sync as u64
 /// Display object
 pub struct Display {
     framebuffer: &'static mut [u16; LCD_PIXELS],
+    /// The sticker's pixels, which layer 2 shows.
+    sticker: &'static mut [u16; STICKER_PIXELS],
+    /// Where the sticker is (top-left), or `None` while it is hidden.
+    sticker_at: Option<(u16, u16)>,
     backlight: PG15<Output<PushPull>>,
     _layer: LtdcLayer1,
     /// The layer's constant alpha, as last set.
@@ -273,11 +281,61 @@ impl Display {
             layer.enable(framebuffer.as_ptr(), PixelFormat::RGB565);
         }
         backlight.set_high();
+        let sticker = take_sticker();
+        set_up_sticker_layer(sticker);
         Self {
             framebuffer,
+            sticker,
+            sticker_at: None,
             backlight,
             _layer: layer,
             opacity: u8::MAX,
+        }
+    }
+
+    /// The sticker's pixels, ARGB4444, row by row. Draw it once at start-up;
+    /// the LCD controller reads it from then on.
+    pub fn sticker_pixels(&mut self) -> &mut [u16; STICKER_PIXELS] {
+        self.sticker
+    }
+
+    /// Shows the sticker with its top-left corner at `at` (kept fully on the
+    /// screen), or hides it. The LCD controller lays it over the picture
+    /// itself and takes the change at the next vertical blank, so moving it
+    /// costs no drawing.
+    #[allow(unsafe_code)]
+    pub fn place_sticker(&mut self, at: Option<(i16, i16)>) {
+        let side = STICKER_SIZE;
+        let clamp = |v: i16, room: usize| {
+            let max = u16::try_from(room).unwrap_or(u16::MAX) - side;
+            u16::try_from(v.max(0)).unwrap_or(0).min(max)
+        };
+        let at = at.map(|(x, y)| (clamp(x, LCD_WIDTH), clamp(y, LCD_HEIGHT)));
+        if at == self.sticker_at {
+            return;
+        }
+        self.sticker_at = at;
+        // SAFETY: only `Display` writes layer 2's registers, and a `Display`
+        // exists only once the LTDC is set up. The window stays inside the
+        // visible area, as the controller needs.
+        unsafe {
+            let ltdc = &*pac::LTDC::ptr();
+            let layer = &ltdc.layer2;
+            match at {
+                None => layer.cr.modify(|_, w| w.len().clear_bit()),
+                Some((x, y)) => {
+                    let bp = ltdc.bpcr.read();
+                    let (h, v) = (bp.ahbp().bits(), bp.avbp().bits());
+                    layer
+                        .whpcr
+                        .write(|w| w.whstpos().bits(x + h + 1).whsppos().bits(x + side + h));
+                    layer
+                        .wvpcr
+                        .write(|w| w.wvstpos().bits(y + v + 1).wvsppos().bits(y + side + v));
+                    layer.cr.modify(|_, w| w.len().set_bit());
+                }
+            }
+            ltdc.srcr.write(|w| w.vbr().set_bit());
         }
     }
 
@@ -358,6 +416,52 @@ fn take_framebuffer() -> &'static mut [u16; LCD_PIXELS] {
         let fb = &mut *core::ptr::addr_of_mut!(FRAMEBUFFER);
         core::ptr::write_bytes(fb.as_mut_ptr(), 0, 1);
         &mut fb.assume_init_mut().0
+    }
+}
+
+/// The sticker's memory, aligned to a cache line.
+#[repr(C, align(32))]
+struct Sticker([u16; STICKER_PIXELS]);
+
+/// The sticker in RAM. Like the framebuffer it lives in the AXI SRAM, where
+/// the LTDC can read it, and starts out cleared (fully see-through).
+#[allow(unsafe_code)]
+fn take_sticker() -> &'static mut [u16; STICKER_PIXELS] {
+    #[link_section = ".axisram.sticker"]
+    static mut STICKER: MaybeUninit<Sticker> = MaybeUninit::uninit();
+    // SAFETY: only `Display::new` calls this, once (see `take_framebuffer`),
+    // so this is the only reference. All zero bytes are a valid `[u16; N]`.
+    unsafe {
+        let s = &mut *core::ptr::addr_of_mut!(STICKER);
+        core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+        &mut s.assume_init_mut().0
+    }
+}
+
+/// Sets layer 2 up to show `sticker` (ARGB4444, blended over layer 1 by its
+/// own alpha), switched off until [`Display::place_sticker`] shows it.
+#[allow(unsafe_code)]
+fn set_up_sticker_layer(sticker: &[u16; STICKER_PIXELS]) {
+    let line = STICKER_SIZE * 2;
+    // SAFETY: runs once from `Display::new`, after the LTDC is set up and
+    // before anything else touches layer 2. The buffer is a static in the AXI
+    // SRAM, which the LTDC can read, and is never moved.
+    unsafe {
+        let ltdc = &*pac::LTDC::ptr();
+        let layer = &ltdc.layer2;
+        layer.cr.modify(|_, w| w.len().clear_bit());
+        layer.pfcr.write(|w| w.pf().argb4444());
+        layer.cacr.write(|w| w.consta().bits(u8::MAX));
+        layer.dccr.reset();
+        layer.bfcr.write(|w| w.bf1().pixel().bf2().pixel());
+        layer
+            .cfbar
+            .write(|w| w.cfbadd().bits(sticker.as_ptr() as u32));
+        layer
+            .cfblr
+            .write(|w| w.cfbp().bits(line).cfbll().bits(line + 7));
+        layer.cfblnr.write(|w| w.cfblnbr().bits(STICKER_SIZE));
+        ltdc.srcr.write(|w| w.imr().set_bit());
     }
 }
 

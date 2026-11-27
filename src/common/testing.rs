@@ -109,6 +109,11 @@ impl Rig {
     /// the trace game for a rig made [`Rig::with_trace`].
     pub fn play_to_question(&mut self) {
         self.tap(10, 10);
+        self.play_to_question_from_story();
+    }
+
+    /// [`Rig::play_to_question`] from the first story page.
+    pub fn play_to_question_from_story(&mut self) {
         for r in CH0 {
             self.tap_rect(r);
         }

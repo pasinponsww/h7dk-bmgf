@@ -47,6 +47,29 @@ pub const FADE_MS: u32 = 450;
 /// How long the heart wipe takes to open a new scene.
 pub const WIPE_MS: u32 = 700;
 
+/// Half the sticker's size: it is placed by its middle.
+const STICKER_HALF: i16 = 24;
+
+/// Where the sticker on the LCD controller's second layer goes (its top-left
+/// corner), or `None` to hide it. It rides just above her finger while she
+/// traces the heart, and floats in a lazy figure of eight over the right of
+/// the celebration once the heart wipe has opened it.
+pub fn sticker_spot(model: &Model, t_ms: u32) -> Option<(i16, i16)> {
+    let since = t_ms.wrapping_sub(model.scene_start_ms);
+    match model.scene {
+        Scene::Trace { .. } if model.traced_ms.is_none() => {
+            let pen = model.pen?;
+            Some((pen.x - STICKER_HALF, pen.y - 3 * STICKER_HALF))
+        }
+        Scene::Celebration if since >= WIPE_MS => {
+            let x = 340 + ui::sticker::wave(t_ms, 5_200) * 110 / 1_000;
+            let y = 140 + ui::sticker::wave(t_ms.wrapping_mul(2), 5_200) * 45 / 1_000;
+            Some((to_i16(x) - STICKER_HALF, to_i16(y) - STICKER_HALF))
+        }
+        _ => None,
+    }
+}
+
 /// How much of the picture shows, from 0 (only the background pink) to 255,
 /// for the LCD controller's layer fade. The intro fades in: at power-on and
 /// whenever the story goes back to the beginning. The other scenes open with
@@ -1509,6 +1532,43 @@ mod tests {
             None,
             "not in the story"
         );
+    }
+
+    #[test]
+    fn the_sticker_rides_above_the_finger_while_tracing() {
+        let mut r = Rig::with_trace();
+        r.play_to_question();
+        let t = r.m.now_ms;
+        assert_eq!(sticker_spot(&r.m, t), None, "no finger yet");
+        r.tap(300, 200);
+        assert_eq!(sticker_spot(&r.m, t), Some((276, 128)));
+        r.drag(320, 180);
+        assert_eq!(sticker_spot(&r.m, t), Some((296, 108)), "it follows");
+        r.send(Event::Touch(TouchEvent::Up(Point::new(320, 180))));
+        assert_eq!(sticker_spot(&r.m, t), None, "gone when the finger lifts");
+    }
+
+    #[test]
+    fn the_sticker_floats_over_the_celebration_and_nowhere_else() {
+        let mut r = Rig::new();
+        assert_eq!(sticker_spot(&r.m, 5_000), None, "not on the intro");
+        r.tap(1, 1);
+        assert_eq!(sticker_spot(&r.m, 5_000), None, "not in the story");
+        r.play_to_question_from_story();
+        let yes = r.m.yes_rect();
+        r.tap_rect(yes);
+        let t = r.m.now_ms;
+        assert_eq!(sticker_spot(&r.m, t), None, "not under the heart wipe");
+        let a = sticker_spot(&r.m, t + WIPE_MS).unwrap();
+        let b = sticker_spot(&r.m, t + WIPE_MS + 700).unwrap();
+        assert_ne!(a, b, "it moves");
+        for dt in (0..10_400).step_by(100) {
+            let (x, y) = sticker_spot(&r.m, t + WIPE_MS + dt).unwrap();
+            assert!(
+                (200..=440).contains(&x) && (60..=200).contains(&y),
+                "({x}, {y})"
+            );
+        }
     }
 
     #[test]

@@ -25,6 +25,9 @@ const FRAME_MS: u32 = 33;
 /// the top of the next LCD refresh. A refresh takes 16.8 ms, so frames start
 /// on every second refresh: 29.7 frames a second.
 const FRAME_LEAD_MS: u32 = 30;
+// The sticker the board's second LCD layer shows is the one `ui` draws.
+const _: () = assert!(bsp::STICKER_PIXELS == ui::sticker::PIXELS);
+
 /// The LCD controller's line counter on this panel.
 const SCAN: Timing = Timing {
     active_start: bsp::SCAN_ACTIVE_START,
@@ -189,6 +192,8 @@ mod firmware {
         defmt::info!("core clock {} Hz", core_clock_hz);
 
         Mono::start(core.SYST, core_clock_hz);
+        // The sticker for the LCD controller's second layer, drawn once.
+        ui::sticker::render(display.sticker_pixels());
         // Start from plain pink: the intro fades in over it, and the empty
         // framebuffer is never seen.
         display.set_fade_color(ui::theme::BACKGROUND_RGB);
@@ -250,6 +255,7 @@ mod firmware {
             let finger_down = finger.is_some() && !*cx.local.was_touching;
             // A finger that stays on the glass is moving (tracing the heart).
             let finger_held = finger.is_some() && *cx.local.was_touching;
+            let finger_up = finger.is_none() && *cx.local.was_touching;
             *cx.local.was_touching = finger.is_some();
             // A quick sideways move before the finger lifts is a swipe.
             let swipe = cx
@@ -309,6 +315,11 @@ mod firmware {
                 if let (true, Some(t)) = (finger_held, finger) {
                     let at = Point::new(t.x, t.y);
                     fx = update(model, &story, rng, Event::Touch(TouchEvent::Move(at)));
+                    merge(&mut all, &fx);
+                }
+                if finger_up {
+                    let at = Point::new(0, 0);
+                    fx = update(model, &story, rng, Event::Touch(TouchEvent::Up(at)));
                     merge(&mut all, &fx);
                 }
                 if let Some(s) = swipe {
@@ -417,10 +428,11 @@ mod firmware {
                 copy = copy.wrapping_add(t3.wrapping_sub(t2));
             }
 
-            // The layer fade, taken by the LCD controller at the next blank.
-            cx.local
-                .display
-                .set_opacity(app::screen::opacity(&model, started));
+            // The layer fade and the sticker, taken by the LCD controller at
+            // the next blank.
+            let display = &mut *cx.local.display;
+            display.set_opacity(app::screen::opacity(&model, started));
+            display.place_sticker(app::screen::sticker_spot(&model, started));
 
             FRAMES.fetch_add(1, Ordering::Relaxed);
             if let Some(r) = cx.local.stats.record(draw, copy, now_ms()) {
