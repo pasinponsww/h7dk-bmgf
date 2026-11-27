@@ -25,6 +25,7 @@ use ui::mascot::{self, Mood};
 use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
+use crate::fonts::{PRESS_START, VT323};
 use crate::state::{
     dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W,
 };
@@ -356,7 +357,7 @@ impl Painter {
         D: DrawTarget<Color = Rgb565>,
     {
         let center = (RIGHT_COLUMN_X + i32::from(SCREEN_W)) / 2;
-        big_text_centered(target, INTRO_TITLE, center, 64, theme::TEXT, 2)?;
+        pixel_text_centered(target, INTRO_TITLE, center, 70, 3, theme::TEXT)?;
         let button = Rect::new(to_i16(center - 70), 140, 140, 48);
         let pulse = to_i16(triangle(self.since(), 1_200, 5));
         pill_shadow(target, button)?;
@@ -382,10 +383,10 @@ impl Painter {
         };
 
         // Title, wrapped to the left column, then one dot per chapter.
-        let mut y = 12;
-        for line in wrap(page.title, 24).take(2) {
-            text(target, line, GPoint::new(16, y), &FONT_10X20, theme::TEXT)?;
-            y += 22;
+        let mut y = 14;
+        for line in wrap(page.title, 15).take(2) {
+            pixel_text(target, line, GPoint::new(16, y), 2, theme::TEXT)?;
+            y += 20;
         }
         self.trail(target, ch, y + 4)?;
 
@@ -419,6 +420,7 @@ impl Painter {
                 let typing = Typing {
                     shown: shown_chars,
                     font,
+                    scale: 1,
                     color: theme::TEXT,
                     step,
                     t_ms: self.t_ms,
@@ -458,7 +460,7 @@ impl Painter {
             let pulse = to_i16(triangle(self.since(), 900, 4));
             ring(target, grow(NEXT_BUTTON, 2 + pulse), 14, theme::TILE, 3)?;
             rounded(target, NEXT_BUTTON, 12, theme::ICON, None)?;
-            label(target, NEXT_BUTTON, "Next >", theme::ON_ICON)
+            label(target, NEXT_BUTTON, "Next>", theme::ON_ICON)
         } else {
             rounded(target, NEXT_BUTTON, 12, theme::MAUVE, None)?;
             label(target, NEXT_BUTTON, "Next", theme::MUTED)
@@ -537,7 +539,7 @@ impl Painter {
             let half = i32::from(art.size) / 2;
             art.draw(target, GPoint::new(cx - half, cy - half), ICON_TONES)
         } else {
-            big_text_centered(target, "?", cx, cy - 20, theme::ICON, 2)
+            pixel_text_centered(target, "?", cx, cy - 12, 3, theme::ICON)
         }
     }
 
@@ -550,7 +552,8 @@ impl Painter {
     {
         let done = self.model.traced_for(self.t_ms);
         let center_x = (i32::from(DOT_AT[6].0) + i32::from(DOT_AT[18].0)) / 2;
-        text_centered(target, TRACE.prompt, center_x, 20, &FONT_10X20, theme::TEXT)?;
+        let scale = pixel_scale(TRACE.prompt, 2 * (470 - center_x), 2);
+        pixel_text_centered(target, TRACE.prompt, center_x, 18, scale, theme::TEXT)?;
         let traced = (hit & trace::ALL).count_ones();
         let mut count = Line::new();
         let _ = write!(count, "{traced} / {DOTS}");
@@ -601,12 +604,13 @@ impl Painter {
 
         if let Some(age) = done {
             // "Perfect!" grows into place inside the finished heart.
-            let scale = if age < 150 { 1 } else { 2 };
-            big_text_centered(target, "Perfect!", center_x, 128, theme::ICON, scale)?;
+            // It pops in: small for a moment, then full size.
+            let (scale, y) = if age < 150 { (1, 132) } else { (2, 128) };
+            pixel_text_centered(target, "Perfect!", center_x, y, scale, theme::ICON)?;
         } else if self.model.next_unlocked(&Content) {
             shadow(target, NEXT_BUTTON, 12)?;
             rounded(target, NEXT_BUTTON, 12, theme::ICON, None)?;
-            label(target, NEXT_BUTTON, "Next >", theme::ON_ICON)?;
+            label(target, NEXT_BUTTON, "Next>", theme::ON_ICON)?;
         }
         Ok(())
     }
@@ -618,16 +622,18 @@ impl Painter {
         // The question types itself out once the heart wipe has opened.
         let typing = Typing {
             shown: self.since().checked_sub(WIPE_MS).map_or(0, typed),
-            font: &FONT_10X20,
+            font: &PRESS_START,
+            scale: 2,
             color: theme::TEXT,
             step: 24,
             t_ms: self.t_ms,
         };
         typing.draw(
             target,
-            wrap(ENDING.question.en, 36).take(3),
+            // 23 characters of 16 pixels end left of the dog in the corner.
+            wrap(ENDING.question.en, 23).take(3),
             Align::Left(16),
-            20,
+            24,
         )?;
 
         let no = self.model.no_rect;
@@ -667,15 +673,15 @@ impl Painter {
         let center = (RIGHT_COLUMN_X + i32::from(SCREEN_W)) / 2;
         let room = i32::from(SCREEN_W) - RIGHT_COLUMN_X - 10;
         let mut y = 60;
-        if to_i32(ENDING.title.chars().count()) * 20 <= room {
-            big_text_centered(target, ENDING.title, center, y, theme::TEXT, 2)?;
-            y += 52;
+        if pixel_width(ENDING.title, 2) <= room {
+            pixel_text_centered(target, ENDING.title, center, y, 2, theme::TEXT)?;
+            y += 36;
         } else {
-            for line in wrap(ENDING.title, 26).take(2) {
-                text_centered(target, line, center, y, &FONT_10X20, theme::TEXT)?;
-                y += 24;
+            for line in wrap(ENDING.title, usize::try_from(room / 8).unwrap_or(1)).take(2) {
+                pixel_text_centered(target, line, center, y, 1, theme::TEXT)?;
+                y += 14;
             }
-            y += 8;
+            y += 10;
         }
         // The message types itself out once the title has had a moment.
         let typing = Typing {
@@ -683,14 +689,15 @@ impl Painter {
                 .since()
                 .checked_sub(WIPE_MS + MESSAGE_DELAY_MS)
                 .map_or(0, typed),
-            font: &FONT_10X20,
+            font: &VT323,
+            scale: 1,
             color: theme::ICON,
-            step: 24,
+            step: 22,
             t_ms: self.t_ms,
         };
         typing.draw(
             target,
-            wrap(ENDING.message.en, 26).take(3),
+            wrap(ENDING.message.en, 32).take(3),
             Align::Center(center),
             y,
         )?;
@@ -1019,39 +1026,102 @@ where
     text(target, s, at, font, color)
 }
 
-/// The 10 x 20 font blown up `scale` times, centered on `cx`, top at `y`.
-fn big_text_centered<D>(
+/// Press Start 2P's cell size before scaling: 8 x 8.
+const PIXEL_CELL: i32 = 8;
+
+/// How wide `s` is in Press Start 2P at `scale`.
+fn pixel_width(s: &str, scale: u32) -> i32 {
+    to_i32(s.chars().count()) * PIXEL_CELL * to_i32_u(scale)
+}
+
+/// The biggest scale, up to `max`, at which `s` fits in `room` pixels in
+/// Press Start 2P (1 if none does).
+fn pixel_scale(s: &str, room: i32, max: u32) -> u32 {
+    (1..=max)
+        .rev()
+        .find(|&k| pixel_width(s, k) <= room)
+        .unwrap_or(1)
+}
+
+/// Text in any font, every font pixel a `scale` by `scale` square. The pixel
+/// fonts are drawn as they are; the plain fonts are drawn bold.
+fn font_text<D>(
     target: &mut D,
     s: &str,
-    cx: i32,
-    y: i32,
-    color: Rgb565,
+    at: GPoint,
+    font: &MonoFont<'_>,
     scale: u32,
+    color: Rgb565,
 ) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let w = text_width(s, &FONT_10X20) * to_i32_u(scale);
-    let at = GPoint::new(cx - w / 2, y);
-    let area = Rectangle::new(at, Size::new(to_u32_i(w) + scale, 20 * scale));
-    if !visible(target, &area) {
+    if scale <= 1 && !is_pixel_font(font) {
+        return text(target, s, at, font, color);
+    }
+    let k = scale.max(1);
+    let cell = font.character_size * k;
+    let width = to_u32_i(text_width(s, font)) * k;
+    if !visible(target, &Rectangle::new(at, Size::new(width, cell.height))) {
         return Ok(());
     }
-    // Bold: drawn twice, one font pixel apart.
-    let mut big = Scaled::new(target, at, scale);
-    let style = MonoTextStyle::new(&FONT_10X20, color);
-    for dx in [0, 1] {
-        Text::with_baseline(s, GPoint::new(dx, 0), style, Baseline::Top).draw(&mut big)?;
+    let style = MonoTextStyle::new(font, color);
+    if k == 1 {
+        Text::with_baseline(s, at, style, Baseline::Top).draw(target)?;
+    } else {
+        let mut big = Scaled::new(target, at, k);
+        Text::with_baseline(s, GPoint::zero(), style, Baseline::Top).draw(&mut big)?;
     }
     Ok(())
+}
+
+/// True for the baked pixel fonts, which are drawn as they are rather than
+/// bold. Fonts are constants, so they are told apart by their cell size (no
+/// built-in font is 8 x 8 or 8 x 20).
+fn is_pixel_font(font: &MonoFont<'_>) -> bool {
+    font.character_size == PRESS_START.character_size || font.character_size == VT323.character_size
+}
+
+/// Press Start 2P at `scale`, its top-left at `at`.
+fn pixel_text<D>(
+    target: &mut D,
+    s: &str,
+    at: GPoint,
+    scale: u32,
+    color: Rgb565,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    font_text(target, s, at, &PRESS_START, scale, color)
+}
+
+/// Press Start 2P at `scale`, centered on `cx`, its top at `y`.
+fn pixel_text_centered<D>(
+    target: &mut D,
+    s: &str,
+    cx: i32,
+    y: i32,
+    scale: u32,
+    color: Rgb565,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let at = GPoint::new(cx - pixel_width(s, scale) / 2, y);
+    pixel_text(target, s, at, scale, color)
 }
 
 /// The font for a story line in its card: the biggest of 7 x 13, 6 x 10 and
 /// 5 x 8 that fits the whole line. Returns the font, characters per line,
 /// most lines and the line height.
 fn card_font(line: &str) -> (&'static MonoFont<'static>, usize, usize, i32) {
-    let fonts: [(&'static MonoFont<'static>, i32); 3] =
-        [(&FONT_7X13, 14), (&FONT_6X10, 11), (&FONT_5X8, 9)];
+    let fonts: [(&'static MonoFont<'static>, i32); 4] = [
+        (&VT323, 20),
+        (&FONT_7X13, 14),
+        (&FONT_6X10, 11),
+        (&FONT_5X8, 9),
+    ];
     let room = usize::try_from(i32::from(CARD.w) - 2 * CARD_PAD_X).unwrap_or(0);
     let height = i32::from(CARD.h) - CARD_PAD_TOP - 2;
     let fit = |(font, step): (&'static MonoFont<'static>, i32)| {
@@ -1064,7 +1134,7 @@ fn card_font(line: &str) -> (&'static MonoFont<'static>, usize, usize, i32) {
         .into_iter()
         .map(fit)
         .find(|(_, width, lines, _)| wrap(line, *width).count() <= *lines)
-        .unwrap_or_else(|| fit(fonts[2]))
+        .unwrap_or_else(|| fit(fonts[3]))
 }
 
 /// Writes `s` centered on a button, in the biggest font that fits.
@@ -1074,8 +1144,12 @@ where
 {
     let room = i32::from(r.w) - 16;
     let (cx, cy) = center(r);
-    if text_width(s, &FONT_10X20) * 2 <= room && i32::from(r.h) >= 52 {
-        return big_text_centered(target, s, cx, cy - 20, color, 2);
+    // The pixel font where it fits big enough, else the plain fonts.
+    for (scale, min_h) in [(3, 52), (2, 36)] {
+        if pixel_width(s, scale) <= room && i32::from(r.h) >= min_h {
+            let h = PIXEL_CELL * to_i32_u(scale);
+            return pixel_text_centered(target, s, cx, cy - h / 2, scale, color);
+        }
     }
     let font = [&FONT_10X20, &FONT_7X13, &FONT_6X10]
         .into_iter()
@@ -1109,6 +1183,8 @@ enum Align {
 struct Typing<'f> {
     shown: usize,
     font: &'f MonoFont<'f>,
+    /// Every font pixel becomes a square this many screen pixels wide.
+    scale: u32,
     color: Rgb565,
     /// Distance from one line's top to the next.
     step: i32,
@@ -1132,18 +1208,26 @@ impl Typing<'_> {
         let mut left = self.shown;
         for (k, line) in lines.enumerate() {
             let y = top + to_i32(k) * self.step;
+            let scale = to_i32_u(self.scale.max(1));
             let x = match align {
                 Align::Left(x) => x,
-                Align::Center(cx) => cx - text_width(line, self.font) / 2,
+                Align::Center(cx) => cx - text_width(line, self.font) * scale / 2,
             };
             let count = line.chars().count();
             let part = first_chars(line, left);
-            text(target, part, GPoint::new(x, y), self.font, self.color)?;
+            font_text(
+                target,
+                part,
+                GPoint::new(x, y),
+                self.font,
+                self.scale,
+                self.color,
+            )?;
             if left <= count {
                 // Still typing: a blinking block where the next letter goes.
                 if (self.t_ms / 250).is_multiple_of(2) {
-                    let cell = self.font.character_size;
-                    let at = GPoint::new(x + text_width(part, self.font), y + 1);
+                    let cell = self.font.character_size * self.scale.max(1);
+                    let at = GPoint::new(x + text_width(part, self.font) * scale, y + 1);
                     let block = Rectangle::new(at, Size::new(cell.width / 2 + 1, cell.height - 2));
                     if visible(target, &block) {
                         target.fill_solid(&block, theme::ICON)?;
@@ -1653,7 +1737,11 @@ mod tests {
             assert!(wrap(&longest, width).count() <= lines, "{longest}");
             assert!(CARD_PAD_TOP + to_i32(lines) * step <= i32::from(CARD.h));
         }
-        // Short lines keep the big font.
-        assert_eq!(card_font("Add a memory here.").0.character_size.width, 7);
+        // Short lines get the tall VT323 pixel font, long ones a plain font.
+        let vt323 = |f: &MonoFont<'_>| f.character_size == VT323.character_size;
+        assert!(vt323(card_font("Add a memory here.").0));
+        assert!(!vt323(card_font(&"word ".repeat(32)).0));
+        assert!(is_pixel_font(&VT323) && is_pixel_font(&PRESS_START));
+        assert!(!is_pixel_font(&FONT_7X13) && !is_pixel_font(&FONT_10X20));
     }
 }

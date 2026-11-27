@@ -134,6 +134,115 @@ pub static TRACE: Trace = Trace {{ enabled: {enabled}, prompt: {prompt:?} }};
     )
 }
 
+/// One pixel font to bake from a TTF file.
+struct FontJob {
+    /// The Rust name of the font.
+    name: &'static str,
+    /// The TTF file, inside `assets/fonts/pixel`.
+    file: &'static str,
+    /// Size to render at, in pixels.
+    px: f32,
+    /// Width and height of one character cell.
+    cell: (u32, u32),
+    /// Coverage (0 to 255) a pixel needs to be drawn.
+    threshold: u8,
+}
+
+/// Bakes `job` into an embedded-graphics `MonoFont`: the 96 glyphs from space
+/// to DEL in a 16 by 6 grid of cells, one bit per pixel, written to
+/// `out/fonts/<name>.raw`. Returns the Rust code of the font.
+fn bake_font(root: &Path, out: &Path, job: &FontJob) -> String {
+    let file = root.join("assets/fonts/pixel").join(job.file);
+    println!("cargo:rerun-if-changed={}", file.display());
+    let data =
+        fs::read(&file).unwrap_or_else(|e| fail(&format!("cannot read {}: {e}", file.display())));
+    let font = fontdue::Font::from_bytes(data, fontdue::FontSettings::default())
+        .unwrap_or_else(|e| fail(&format!("{}: {e}", file.display())));
+    let ascent = font
+        .horizontal_line_metrics(job.px)
+        .map_or(job.px, |m| m.ascent)
+        .round() as i32;
+    let (cw, ch) = job.cell;
+    let cols = 16u32;
+    let width = cols * cw;
+    let stride = width.div_ceil(8);
+    let mut raw = vec![0u8; (stride * 6 * ch) as usize];
+    for (i, code) in (0x20u8..=0x7f).enumerate() {
+        if code == 0x7f {
+            continue;
+        }
+        let (m, bitmap) = font.rasterize(char::from(code), job.px);
+        let (cx, cy) = (i as u32 % cols * cw, i as u32 / cols * ch);
+        // fontdue's ymin is how far the bitmap's bottom sits above the baseline.
+        let top = ascent - (m.ymin + m.height as i32);
+        for y in 0..m.height {
+            for x in 0..m.width {
+                if bitmap[y * m.width + x] < job.threshold {
+                    continue;
+                }
+                let gx = m.xmin + x as i32;
+                let gy = top + y as i32;
+                if gx < 0 || gy < 0 || gx >= cw as i32 || gy >= ch as i32 {
+                    fail(&format!(
+                        "{}: '{}' does not fit its {cw} x {ch} cell",
+                        job.file,
+                        char::from(code)
+                    ));
+                }
+                let (px, py) = (cx + gx as u32, cy + gy as u32);
+                raw[(py * stride + px / 8) as usize] |= 0x80 >> (px % 8);
+            }
+        }
+    }
+    let dir = out.join("fonts");
+    fs::create_dir_all(&dir).expect("could not create the font folder");
+    let path = dir.join(format!("{}.raw", job.name.to_lowercase()));
+    fs::write(&path, raw).expect("could not write a font");
+    let path = path.display().to_string();
+    let baseline = (ascent - 1).max(0);
+    format!(
+        "/// {file} at {px} px, baked by build.rs.
+         pub const {name}: MonoFont = MonoFont {{
+             image: ImageRaw::new(include_bytes!({path:?}), {width}),
+             glyph_mapping: &mapping::ASCII,
+             character_size: Size::new({cw}, {ch}),
+             character_spacing: 0,
+             baseline: {baseline},
+             underline: DecorationDimensions::new({under}, 1),
+             strikethrough: DecorationDimensions::new({strike}, 1),
+         }};
+",
+        file = job.file,
+        px = job.px,
+        name = job.name,
+        under = baseline + 2,
+        strike = ch / 2,
+    )
+}
+
+/// The pixel fonts in `assets/fonts/pixel`, baked for embedded-graphics.
+fn write_fonts(root: &Path, out: &Path) {
+    let jobs = [
+        // Drawn on an 8 x 8 grid: crisp at 8 px, scaled up on the board.
+        FontJob {
+            name: "PRESS_START",
+            file: "PressStart2P-Regular.ttf",
+            px: 8.0,
+            cell: (8, 8),
+            threshold: 128,
+        },
+        FontJob {
+            name: "VT323",
+            file: "VT323-Regular.ttf",
+            px: 20.0,
+            cell: (8, 20),
+            threshold: 128,
+        },
+    ];
+    let code: String = jobs.iter().map(|j| bake_font(root, out, j)).collect();
+    fs::write(out.join("fonts.rs"), code).expect("could not write fonts.rs");
+}
+
 fn main() {
     let root =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
@@ -141,6 +250,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     write_story_table(&root, &out);
+    write_fonts(&root, &out);
 
     if env::var_os("CARGO_FEATURE_FIRMWARE").is_some() {
         link_memory_map(&root, &out);

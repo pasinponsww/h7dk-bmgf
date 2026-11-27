@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod common;
+pub mod fonts;
 pub mod screen;
 pub mod task;
 
