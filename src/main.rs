@@ -182,10 +182,21 @@ mod firmware {
             mut display,
             touch,
             watchdog,
+            mut flash,
             reset_by_watchdog,
             core_clock_hz,
             seed,
         } = Board::init(cx.device);
+        // A photo album written by `cargo proj mbedded photos`, if there is one.
+        let mut header = [0u8; app::album::HEADER_BYTES as usize];
+        match flash
+            .read(0, &mut header)
+            .ok()
+            .and_then(|()| app::album::Album::parse(&header))
+        {
+            Some(album) => defmt::info!("album: {} photos on the flash", album.count),
+            None => defmt::info!("album: none on the flash"),
+        }
         if reset_by_watchdog {
             defmt::warn!("started again after a hang");
         }

@@ -18,6 +18,8 @@ use stm32h7xx_hal::rng::RngExt;
 use stm32h7xx_hal::timer::{Event as TimerEvent, Timer};
 use stm32h7xx_hal::{pac, prelude::*};
 
+use crate::flash::ExternalFlash;
+
 pub const LCD_WIDTH: usize = 480;
 pub const LCD_HEIGHT: usize = 272;
 pub const LCD_PIXELS: usize = LCD_WIDTH * LCD_HEIGHT;
@@ -34,6 +36,8 @@ pub struct Board {
     pub display: Display,
     pub touch: Touch,
     pub watchdog: Watchdog,
+    /// The 64 MB flash on OCTOSPI1, for reading the photo album.
+    pub flash: ExternalFlash,
     /// The last restart was the watchdog's doing: something hung.
     pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
@@ -157,6 +161,26 @@ impl Board {
         );
         let touch = Touch::new(i2c);
 
+        step("external flash (OCTOSPI1, 1-bit SPI at 50 MHz)");
+        // The pins as wired on the STM32H735G-DK (and in the HAL's own
+        // octospi example for this board).
+        macro_rules! ospi_pins {
+            ($af:literal: $($pin:expr),+ $(,)?) => {
+                $( let _ = $pin.into_alternate::<$af>().speed(Speed::VeryHigh); )+
+            };
+        }
+        ospi_pins!(9: gpiof.pf10, gpiod.pd11, gpiod.pd12, gpioe.pe2, gpiod.pd13, gpiog.pg9);
+        ospi_pins!(10: gpiog.pg6, gpiod.pd4, gpiod.pd5, gpiod.pd7);
+        let ospi =
+            dp.OCTOSPI1
+                .octospi_unchecked(50.MHz(), &clocks.clocks, clocks.peripheral.OCTOSPI1);
+        let mut flash = ExternalFlash::new(ospi);
+        match flash.id() {
+            Some(id) if flash.present() => defmt::info!("flash: MX25LM51245G, id {=[u8]:02x}", id),
+            Some(id) => defmt::warn!("flash: unexpected id {=[u8]:02x}", id),
+            None => defmt::warn!("flash: no answer"),
+        }
+
         step("random seed (RNG)");
         let seed = random_seed(dp.RNG, clocks.peripheral.RNG, &clocks.clocks);
 
@@ -171,6 +195,7 @@ impl Board {
             display,
             touch,
             watchdog,
+            flash,
             reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,

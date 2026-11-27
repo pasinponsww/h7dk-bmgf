@@ -1,3 +1,4 @@
+pub mod album;
 pub mod event;
 pub mod frame_stats;
 pub mod gesture;
