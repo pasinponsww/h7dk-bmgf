@@ -74,12 +74,14 @@ fn now_ms() -> u32 {
 
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
+    use app::frame_stats::FrameStats;
     use app::leds::Dither;
     use app::liveness::Liveness;
     use app::screen::{Cues, Painter};
     use app::story::Content;
     use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
     use bsp::{Board, Button, Display, LedTimer, Leds, Touch, Watchdog};
+    use cortex_m::peripheral::DWT;
     use rtic_monotonics::systick::prelude::*;
     use ui::frame::Band;
 
@@ -101,6 +103,7 @@ mod firmware {
         button: Button,
         touch: Touch,
         display: Display,
+        stats: FrameStats,
         watchdog: Watchdog,
         liveness: Liveness,
         rng: XorShift32,
@@ -137,6 +140,11 @@ mod firmware {
 
         Mono::start(core.SYST, core_clock_hz);
 
+        // The cycle counter times each frame for the once-a-second log line.
+        core.DCB.enable_trace();
+        DWT::unlock();
+        core.DWT.enable_cycle_counter();
+
         let model = Model::new(0);
         log_scene(&model);
 
@@ -154,6 +162,7 @@ mod firmware {
                 button,
                 touch,
                 display,
+                stats: FrameStats::new(core_clock_hz, 0),
                 watchdog,
                 liveness: Liveness::new(0),
                 // A new seed from the hardware RNG on every start-up, so the
@@ -273,6 +282,7 @@ mod firmware {
     /// Draws the screen about 30 times a second, one band of rows at a time.
     #[task(priority = 1, shared = [model, cues], local = [
         display,
+        stats,
         painter: Painter = Painter::new(),
         band: [u16; BAND_LEN] = [0; BAND_LEN],
         first: bool = true,
@@ -287,6 +297,7 @@ mod firmware {
             painter.prepare(&model, &cues, started);
 
             let band = &mut cx.local.band[..];
+            let (mut draw, mut copy) = (0u32, 0u32);
             for (i, rows) in cx
                 .local
                 .display
@@ -294,12 +305,27 @@ mod firmware {
                 .chunks_mut(BAND_LEN)
                 .enumerate()
             {
+                let t0 = DWT::cycle_count();
                 let mut target = Band::new(&mut band[..rows.len()], i * BAND_ROWS);
                 let _ = painter.draw(&mut target);
+                let t1 = DWT::cycle_count();
                 rows.copy_from_slice(target.pixels());
+                let t2 = DWT::cycle_count();
+                draw = draw.wrapping_add(t1.wrapping_sub(t0));
+                copy = copy.wrapping_add(t2.wrapping_sub(t1));
             }
 
             FRAMES.fetch_add(1, Ordering::Relaxed);
+            if let Some(r) = cx.local.stats.record(draw, copy, now_ms()) {
+                defmt::info!(
+                    "frames: {} fps, draw {} us (max {}), copy {} us, busy {}%",
+                    r.frames,
+                    r.draw_avg_us,
+                    r.draw_max_us,
+                    r.copy_avg_us,
+                    r.busy_pct
+                );
+            }
 
             if *cx.local.first {
                 *cx.local.first = false;
