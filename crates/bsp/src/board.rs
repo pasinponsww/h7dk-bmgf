@@ -258,6 +258,8 @@ pub struct Display {
     framebuffer: &'static mut [u16; LCD_PIXELS],
     backlight: PG15<Output<PushPull>>,
     _layer: LtdcLayer1,
+    /// The layer's constant alpha, as last set.
+    opacity: u8,
 }
 
 impl Display {
@@ -275,6 +277,39 @@ impl Display {
             framebuffer,
             backlight,
             _layer: layer,
+            opacity: u8::MAX,
+        }
+    }
+
+    /// Sets the color the picture fades to: the LCD controller's background
+    /// color, which shows through wherever the layer is see-through.
+    #[allow(unsafe_code)]
+    pub fn set_fade_color(&mut self, [r, g, b]: [u8; 3]) {
+        // SAFETY: only `Display` writes the LTDC's background color, and a
+        // `Display` exists only once the LTDC is set up.
+        unsafe {
+            (*pac::LTDC::ptr())
+                .bccr
+                .write(|w| w.bcred().bits(r).bcgreen().bits(g).bcblue().bits(b));
+        }
+    }
+
+    /// How much of the picture shows: 255 all of it, 0 only the fade color
+    /// (see [`Display::set_fade_color`]). The LCD controller blends the two
+    /// itself and takes the new value at the next vertical blank, so a change
+    /// never lands in the middle of a refresh.
+    #[allow(unsafe_code)]
+    pub fn set_opacity(&mut self, alpha: u8) {
+        if alpha == self.opacity {
+            return;
+        }
+        self.opacity = alpha;
+        // SAFETY: only `Display` writes layer 1's constant alpha and asks for
+        // a reload, and a `Display` exists only once the LTDC is set up.
+        unsafe {
+            let ltdc = &*pac::LTDC::ptr();
+            ltdc.layer1.cacr.write(|w| w.consta().bits(alpha));
+            ltdc.srcr.write(|w| w.vbr().set_bit());
         }
     }
 

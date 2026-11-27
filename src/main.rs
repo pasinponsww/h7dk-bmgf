@@ -163,7 +163,7 @@ mod firmware {
             leds,
             led_timer,
             button,
-            display,
+            mut display,
             touch,
             watchdog,
             reset_by_watchdog,
@@ -176,6 +176,10 @@ mod firmware {
         defmt::info!("core clock {} Hz", core_clock_hz);
 
         Mono::start(core.SYST, core_clock_hz);
+        // Start from plain pink: the intro fades in over it, and the empty
+        // framebuffer is never seen.
+        display.set_fade_color(ui::theme::BACKGROUND_RGB);
+        display.set_opacity(0);
 
         // The cycle counter times each frame for the once-a-second log line.
         core.DCB.enable_trace();
@@ -372,6 +376,11 @@ mod firmware {
                 draw = draw.wrapping_add(t1.wrapping_sub(t0));
                 copy = copy.wrapping_add(t3.wrapping_sub(t2));
             }
+
+            // The layer fade, taken by the LCD controller at the next blank.
+            cx.local
+                .display
+                .set_opacity(app::screen::opacity(&model, started));
 
             FRAMES.fetch_add(1, Ordering::Relaxed);
             if let Some(r) = cx.local.stats.record(draw, copy, now_ms()) {

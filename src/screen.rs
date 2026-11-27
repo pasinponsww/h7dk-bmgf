@@ -38,6 +38,25 @@ const POP_MS: u32 = 300;
 const TYPE_MS: u32 = 28;
 /// The celebration message starts typing this long after the title appears.
 const MESSAGE_DELAY_MS: u32 = 700;
+/// How long the intro takes to fade in from the background pink.
+pub const FADE_MS: u32 = 450;
+
+/// How much of the picture shows, from 0 (only the background pink) to 255,
+/// for the LCD controller's layer fade. The intro fades in: at power-on and
+/// whenever the story goes back to the beginning. The other scenes open with
+/// the heart wipe instead.
+pub fn opacity(model: &Model, t_ms: u32) -> u8 {
+    if model.scene != Scene::Intro {
+        return u8::MAX;
+    }
+    let since = t_ms.wrapping_sub(model.scene_start_ms);
+    if since >= FADE_MS {
+        return u8::MAX;
+    }
+    // Ease out: quick at first, settling gently at the end.
+    let left = (FADE_MS - since) * 255 / FADE_MS;
+    u8::try_from(255 - left * left / 255).unwrap_or(u8::MAX)
+}
 /// Text of the intro screen.
 const INTRO_TITLE: &str = "For you";
 /// Label of the intro button.
@@ -1173,6 +1192,22 @@ mod tests {
             7,
         );
         assert_eq!((c.nudge, c.reveal), (None, None));
+    }
+
+    #[test]
+    fn the_intro_fades_in_and_other_scenes_do_not() {
+        let mut r = Rig::new();
+        assert_eq!(opacity(&r.m, 0), 0, "power-on starts from the pink");
+        let mut last = 0;
+        for t in (0..=FADE_MS).step_by(30) {
+            let a = opacity(&r.m, t);
+            assert!(a >= last, "fades in steadily: {a} after {last} at {t} ms");
+            last = a;
+        }
+        assert_eq!(opacity(&r.m, FADE_MS), 255);
+        assert_eq!(opacity(&r.m, FADE_MS * 10), 255);
+        r.tap(1, 1);
+        assert_eq!(opacity(&r.m, r.m.now_ms), 255, "the story uses the wipe");
     }
 
     #[test]

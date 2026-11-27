@@ -18,8 +18,11 @@ pub fn to_raw(color: Rgb565) -> u16 {
     RawU16::from(color).into_inner()
 }
 
+/// [`BACKGROUND`] in 8 bits per channel, for the LCD controller's own
+/// background color (what the screen fades to).
+pub const BACKGROUND_RGB: [u8; 3] = [0xFF, 0xF1, 0xF5];
 /// 70%: screen background, very light pink `#FFF1F5`.
-pub const BACKGROUND: Rgb565 = rgb(0xFF, 0xF1, 0xF5);
+pub const BACKGROUND: Rgb565 = rgb(BACKGROUND_RGB[0], BACKGROUND_RGB[1], BACKGROUND_RGB[2]);
 /// 70%: cards and soft surfaces, light pink `#FADDE1`.
 pub const SURFACE: Rgb565 = rgb(0xFA, 0xDD, 0xE1);
 /// 20%: tiles and big shapes, pink `#FFCAD4`.
