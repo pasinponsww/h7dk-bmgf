@@ -14,7 +14,7 @@ use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::{DrawTarget, Point as GPoint, Primitive, Size};
 use embedded_graphics::primitives::{
-    Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
+    Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle, Triangle,
 };
 use embedded_graphics::text::{Baseline, Text};
 use embedded_graphics::Drawable;
@@ -67,6 +67,12 @@ const INTRO_TITLE: &str = "For you";
 const INTRO_BUTTON: &str = "Open";
 /// Small line under the intro button.
 const INTRO_HINT: &str = "tap to open, or pet me";
+/// What the dog's speech bubble says when it wants attention.
+const ATTRACT_LINE: &str = "tap me!";
+/// The dog plays in cycles this long: jumping first, then a happy bounce.
+const ATTRACT_CYCLE_MS: u32 = 5_000;
+/// How long the jumping lasts in each cycle.
+const ATTRACT_JUMP_MS: u32 = 2_000;
 /// Label of the button that goes back to the intro.
 const RESTART_LABEL: &str = "Start again";
 /// The card under the dog that shows the revealed line, in the bottom-left
@@ -133,9 +139,13 @@ fn running(start: u32, now: u32, length: u32) -> Option<u32> {
 }
 
 /// The mood of the dog in each scene.
-fn mood(model: &Model) -> Mood {
+fn mood(model: &Model, t_ms: u32) -> Mood {
     match model.scene {
-        Scene::Intro => Mood::Happy,
+        Scene::Intro => match model.attracting_for(t_ms) {
+            // Untouched for a while: jump around, then bounce, again and again.
+            Some(a) if a % ATTRACT_CYCLE_MS < ATTRACT_JUMP_MS => Mood::Cheer,
+            _ => Mood::Happy,
+        },
         Scene::Story { chapter, .. } => CHAPTERS
             .get(usize::from(chapter))
             .and_then(|c| Mood::from_name(c.mood))
@@ -191,7 +201,7 @@ impl Painter {
         let pose = match model.petted_for(t_ms) {
             // Petted: heart eyes and a fast wag for a moment.
             Some(petted) => mascot::pose(Mood::Love, petted),
-            None => mascot::pose(mood(model), since),
+            None => mascot::pose(mood(model, t_ms), since),
         };
         mascot::render(&pose, &mut self.dog);
     }
@@ -218,6 +228,7 @@ impl Painter {
         let (at, scale) = dog_place(self.model.scene);
         self.draw_dog(target, at, scale)?;
         self.pet_hearts(target)?;
+        self.speech_bubble(target)?;
         self.ripple(target)?;
         if let Some((center, size)) = self.wipe() {
             heart_shape::fill_outside(target, center, size, theme::TILE)?;
@@ -593,6 +604,42 @@ impl Painter {
             Some((theme::ICON, 3)),
         )?;
         label(target, RESTART_BUTTON, RESTART_LABEL, theme::ICON)
+    }
+
+    /// "tap me!" in a bubble over the dog's head, bobbing, while the dog
+    /// plays for attention on an untouched intro.
+    fn speech_bubble<D>(&self, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let Some(age) = self.model.attracting_for(self.t_ms) else {
+            return Ok(());
+        };
+        let dog = dog_rect(self.model.scene);
+        let bob = to_i16(triangle(age, 1_000, 4));
+        let w = to_i16(text_width(ATTRACT_LINE, &FONT_7X13)) + 20;
+        let bubble = Rect::new(dog.x + dog.w / 2 + 6, 8 + bob, w, 28);
+        // The tail points down and left, towards the dog's head.
+        let (bx, by) = (i32::from(bubble.x), i32::from(bubble.y + bubble.h));
+        let tail = Triangle::new(
+            GPoint::new(bx + 10, by - 2),
+            GPoint::new(bx + 24, by - 2),
+            GPoint::new(bx + 2, by + 10),
+        );
+        let style = PrimitiveStyleBuilder::new()
+            .fill_color(theme::SURFACE)
+            .stroke_color(theme::ICON)
+            .stroke_width(2)
+            .build();
+        shadow(target, bubble, 12)?;
+        tail.into_styled(style).draw(target)?;
+        rounded(target, bubble, 12, theme::SURFACE, Some((theme::ICON, 2)))?;
+        // Open the bubble's edge where the tail joins it.
+        target.fill_solid(
+            &Rectangle::new(GPoint::new(bx + 12, by - 3), Size::new(10, 3)),
+            theme::SURFACE,
+        )?;
+        label(target, bubble, ATTRACT_LINE, theme::ICON)
     }
 
     /// Small hearts that pop out of the dog's head and float up after a pet,
@@ -1316,6 +1363,49 @@ mod tests {
         );
         let after = hearts(&r.m, r.m.now_ms + crate::state::PET_MS + 400);
         assert_eq!(after, before, "back to normal once the love wears off");
+    }
+
+    #[test]
+    fn an_untouched_intro_gets_the_dog_playing_for_attention() {
+        use crate::state::ATTRACT_AFTER_MS;
+        let m = Model::new(0);
+        let mut p = Painter::new();
+        // The bubble's text is the icon pink, which the intro otherwise only
+        // uses for the Open button on the right.
+        let mut bubble = |t: u32| {
+            p.prepare(&m, &Cues::new(), t);
+            let f = full_frame(&p);
+            let raw = theme::to_raw(theme::ICON);
+            (0..60)
+                .flat_map(|y| (100..300).map(move |x| y * WIDTH + x))
+                .filter(|&i| f[i] == raw)
+                .count()
+        };
+        assert_eq!(bubble(ATTRACT_AFTER_MS - 1), 0, "not yet");
+        assert!(bubble(ATTRACT_AFTER_MS + 100) > 100, "tap me!");
+        assert_eq!(m.attracting_for(ATTRACT_AFTER_MS + 100), Some(100));
+        assert_eq!(mood(&m, ATTRACT_AFTER_MS + 100), Mood::Cheer, "jumping");
+        assert_eq!(
+            mood(&m, ATTRACT_AFTER_MS + 3_000),
+            Mood::Happy,
+            "then bouncing"
+        );
+    }
+
+    #[test]
+    fn a_touch_stops_the_attention_seeking() {
+        use crate::state::ATTRACT_AFTER_MS;
+        let mut r = Rig::new();
+        r.tick(ATTRACT_AFTER_MS + 500);
+        assert!(r.m.attracting_for(r.m.now_ms).is_some());
+        r.tap_rect(crate::state::dog_rect(Scene::Intro));
+        assert_eq!(r.m.attracting_for(r.m.now_ms), None, "petting counts");
+        r.tap(300, 30);
+        assert_eq!(
+            r.m.attracting_for(r.m.now_ms + ATTRACT_AFTER_MS),
+            None,
+            "not in the story"
+        );
     }
 
     #[test]

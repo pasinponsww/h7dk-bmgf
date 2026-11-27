@@ -42,6 +42,9 @@ pub const YES_PAD: i16 = 24;
 pub const JUMP_TRIES: usize = 64;
 /// How long the dog stays in love after being petted.
 pub const PET_MS: u32 = 1_800;
+/// After this long untouched on the intro, the dog starts playing to get
+/// attention.
+pub const ATTRACT_AFTER_MS: u32 = 30_000;
 /// The dog sprite's size in sprite pixels (see `ui::mascot`).
 const DOG_W: i16 = 34;
 const DOG_H: i16 = 40;
@@ -147,6 +150,17 @@ impl Model {
     pub fn petted_for(&self, now_ms: u32) -> Option<u32> {
         let since = now_ms.wrapping_sub(self.petted_ms?);
         (since < PET_MS).then_some(since)
+    }
+
+    /// Milliseconds the dog has been playing for attention at `now_ms`: the
+    /// intro has gone untouched for [`ATTRACT_AFTER_MS`] or more.
+    pub fn attracting_for(&self, now_ms: u32) -> Option<u32> {
+        if self.scene != Scene::Intro {
+            return None;
+        }
+        now_ms
+            .wrapping_sub(self.last_touch_ms)
+            .checked_sub(ATTRACT_AFTER_MS)
     }
 
     /// True once the NO button has stopped running away.
