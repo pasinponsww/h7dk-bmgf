@@ -47,6 +47,22 @@ pub const PET_MS: u32 = 1_800;
 /// After this long untouched on the intro, the dog starts playing to get
 /// attention.
 pub const ATTRACT_AFTER_MS: u32 = 30_000;
+/// Untouched this long while waiting (intro or celebration), the screen dims.
+pub const DIM_AFTER_MS: u32 = 120_000;
+/// Untouched this long, the screen goes off until a touch wakes it.
+pub const SLEEP_AFTER_MS: u32 = 300_000;
+
+/// How awake the screen is.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Power {
+    /// On, as usual.
+    Awake,
+    /// Dimmed, still showing.
+    Dim,
+    /// Backlight off, nothing drawn.
+    Asleep,
+}
+
 /// A finished heart stays on screen this long before the question opens.
 pub const TRACE_ADMIRE_MS: u32 = 1_400;
 /// Where a chapter's polaroid sits once every object is found: over the
@@ -235,6 +251,20 @@ impl Model {
     /// The part of the screen the dog covers right now.
     pub const fn dog_rect(&self) -> Rect {
         spot_rect(self.dog_spot())
+    }
+
+    /// How awake the screen should be at `now_ms`. Only the waiting scenes
+    /// (the intro and the celebration) ever dim or sleep: never the story,
+    /// the heart or the question.
+    pub fn power(&self, now_ms: u32) -> Power {
+        if !matches!(self.scene, Scene::Intro | Scene::Celebration) {
+            return Power::Awake;
+        }
+        match now_ms.wrapping_sub(self.last_touch_ms) {
+            idle if idle >= SLEEP_AFTER_MS => Power::Asleep,
+            idle if idle >= DIM_AFTER_MS => Power::Dim,
+            _ => Power::Awake,
+        }
     }
 
     /// Milliseconds since the chapter's polaroid came out, while it shows.

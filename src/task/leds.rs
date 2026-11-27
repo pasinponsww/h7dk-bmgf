@@ -4,7 +4,7 @@
 //! it. [`duty`] turns that into how much of the time the LED must be on, and
 //! [`Dither`] turns the duty into a fast on/off stream for the pins, which can
 //! only be fully on or fully off.
-use crate::state::{Model, Scene};
+use crate::state::{Model, Power, Scene};
 
 /// Full brightness.
 pub const FULL: u8 = 255;
@@ -90,6 +90,10 @@ pub fn duty(brightness: u8) -> u8 {
 /// on an object, otherwise the pattern for the current scene. Returns
 /// `(green, red)`.
 pub fn output(m: &Model) -> (u8, u8) {
+    if m.power(m.now_ms) == Power::Asleep {
+        // Asleep: a slow, faint green breath, like a sleeping laptop.
+        return (duty(breathe(m.now_ms, 5_000, 70)), 0);
+    }
     if m.now_ms < m.flash_until_ms {
         (FULL, FULL)
     } else {
@@ -241,6 +245,15 @@ mod tests {
             "intro: green at the top of a breath"
         );
         assert_eq!(r.tick(3_000).leds, (0, 0), "and dark between breaths");
+    }
+
+    #[test]
+    fn asleep_the_leds_only_breathe_faintly() {
+        let mut r = Rig::new();
+        let t = crate::state::SLEEP_AFTER_MS + 2_500;
+        let (g, red) = r.tick(t).leds;
+        assert!(g > 0 && g < 40, "faint green: {g}");
+        assert_eq!(red, 0);
     }
 
     #[test]

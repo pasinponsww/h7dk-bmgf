@@ -466,6 +466,9 @@ impl Display {
 
     /// Turns the backlight on or off.
     pub fn set_backlight(&mut self, on: bool) {
+        if on == self.backlight.is_set_high() {
+            return;
+        }
         if on {
             self.backlight.set_high();
         } else {

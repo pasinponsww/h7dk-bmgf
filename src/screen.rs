@@ -78,6 +78,10 @@ pub fn sticker_spot(model: &Model, t_ms: u32) -> Option<(i16, i16)> {
     }
 }
 
+/// How much of the picture shows while the screen is dimmed (faded toward
+/// black by the LCD controller): about a third.
+pub const DIM_OPACITY: u8 = 90;
+
 /// How much of the picture shows, from 0 (only the background pink) to 255,
 /// for the LCD controller's layer fade. The intro fades in: at power-on and
 /// whenever the story goes back to the beginning. The other scenes open with

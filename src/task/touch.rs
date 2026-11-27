@@ -8,8 +8,8 @@ use crate::event::Effects;
 use crate::gesture::Swipe;
 use crate::save::Resume;
 use crate::state::{
-    Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON, NO_AREA,
-    PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
+    Model, Power, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
+    NO_AREA, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 use crate::trace;
@@ -28,6 +28,14 @@ pub(crate) fn on_down<S: Story, R: Rng>(
     p: Point,
     fx: &mut Effects,
 ) {
+    // A touch on a dimmed or sleeping screen only wakes it, so it cannot
+    // tap anything by accident.
+    if m.power(m.now_ms) != Power::Awake {
+        m.last_touch_ms = m.now_ms;
+        fx.woke = true;
+        fx.redraw = true;
+        return;
+    }
     m.last_touch_ms = m.now_ms;
     fx.ripple = Some(p);
     match m.scene {
@@ -629,6 +637,37 @@ mod tests {
         assert_eq!(r.m.resume, Resume::Chapter(1));
         r.send(Event::Restart);
         assert_eq!(r.m.resume, Resume::Start);
+    }
+
+    #[test]
+    fn a_touch_on_a_sleeping_screen_only_wakes_it() {
+        use crate::state::{Power, DIM_AFTER_MS, SLEEP_AFTER_MS};
+        let mut r = Rig::new();
+        r.tick(DIM_AFTER_MS - 1);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Awake);
+        r.tick(DIM_AFTER_MS);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Dim);
+        r.tick(SLEEP_AFTER_MS);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Asleep);
+        let fx = r.tap(300, 30);
+        assert!(fx.woke && !fx.scene_changed, "woken, nothing tapped");
+        assert_eq!(r.m.scene, Scene::Intro);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Awake);
+        let fx = r.tap(300, 30);
+        assert!(fx.scene_changed, "the next touch opens the story");
+    }
+
+    #[test]
+    fn the_story_and_the_question_never_sleep() {
+        use crate::state::{Power, SLEEP_AFTER_MS};
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        r.tick(SLEEP_AFTER_MS * 2);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Awake);
+        r.play_to_question_from_story();
+        let t = r.m.now_ms + SLEEP_AFTER_MS * 2;
+        r.tick(t);
+        assert_eq!(r.m.power(r.m.now_ms), Power::Awake);
     }
 
     #[test]

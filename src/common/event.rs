@@ -56,4 +56,6 @@ pub struct Effects {
     pub dodged: bool,
     /// The dog was just petted.
     pub petted: bool,
+    /// A touch woke the dimmed or sleeping screen (and did nothing else).
+    pub woke: bool,
 }

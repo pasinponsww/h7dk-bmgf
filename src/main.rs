@@ -28,6 +28,9 @@ const FRAME_LEAD_MS: u32 = 30;
 // The sticker the board's second LCD layer shows is the one `ui` draws.
 const _: () = assert!(bsp::STICKER_PIXELS == ui::sticker::PIXELS);
 
+/// While the screen sleeps, the render task looks this often for a wake-up.
+const SLEEP_POLL_MS: u32 = 100;
+
 /// The LCD controller's line counter on this panel.
 const SCAN: Timing = Timing {
     active_start: bsp::SCAN_ACTIVE_START,
@@ -253,6 +256,7 @@ mod firmware {
     use app::liveness::Liveness;
     use app::pacing::Racer;
     use app::screen::{Cues, Painter};
+    use app::state::Power;
     use app::story::Content;
     use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
     use bsp::{Board, Button, Display, LedTimer, Leds, Touch, Watchdog};
@@ -263,7 +267,7 @@ mod firmware {
     use super::{
         load_album, log_scene, moment_of, next_tap, now_ms, open_secret, save_progress,
         wait_for_top_blank, HwTrig, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_LEAD_MS,
-        FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
+        FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, SLEEP_POLL_MS, TICK_MS,
     };
 
     #[shared]
@@ -597,6 +601,7 @@ mod firmware {
         first: bool = true,
         in_step: bool = true,
         secret_opened: bool = false,
+        power: app::state::Power = app::state::Power::Awake,
     ])]
     async fn render(mut cx: render::Context) {
         loop {
@@ -609,6 +614,37 @@ mod firmware {
             let started = now_ms();
             let model = cx.shared.model.lock(|m| *m);
             let cues = cx.shared.cues.lock(|c| *c);
+
+            // Dimmed or asleep while waiting untouched; a touch wakes it.
+            let power = model.power(started);
+            if power != *cx.local.power {
+                *cx.local.power = power;
+                let display = &mut *cx.local.display;
+                match power {
+                    Power::Awake => {
+                        display.set_fade_color(ui::theme::BACKGROUND_RGB);
+                        display.set_backlight(true);
+                        defmt::info!("screen: awake");
+                    }
+                    Power::Dim => {
+                        display.set_fade_color([0, 0, 0]);
+                        display.set_backlight(true);
+                        defmt::info!("screen: dimmed");
+                    }
+                    Power::Asleep => {
+                        display.set_backlight(false);
+                        defmt::info!("screen: asleep");
+                    }
+                }
+            }
+            if power == Power::Asleep {
+                // Nothing to draw. Still count a frame, so the watchdog knows
+                // this task is fine, and look again in a moment.
+                FRAMES.fetch_add(1, Ordering::Relaxed);
+                Mono::delay(SLEEP_POLL_MS.millis()).await;
+                continue;
+            }
+
             let painter = &mut *cx.local.painter;
             // She said yes: open the secret message with the AES engine.
             if model.scene == app::Scene::Celebration && !*cx.local.secret_opened {
@@ -649,7 +685,10 @@ mod firmware {
             // The layer fade and the sticker, taken by the LCD controller at
             // the next blank.
             let display = &mut *cx.local.display;
-            display.set_opacity(app::screen::opacity(&model, started));
+            display.set_opacity(match power {
+                app::state::Power::Dim => app::screen::DIM_OPACITY,
+                _ => app::screen::opacity(&model, started),
+            });
             display.place_sticker(app::screen::sticker_spot(&model, started));
 
             FRAMES.fetch_add(1, Ordering::Relaxed);
