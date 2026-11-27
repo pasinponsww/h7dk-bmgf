@@ -8,7 +8,7 @@ use crate::event::Effects;
 use crate::gesture::Swipe;
 use crate::state::{
     dog_rect, Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
-    NO_AREA, RESTART_BUTTON, SCREEN_W, YES_PAD,
+    NO_AREA, PHOTO_CARD, RESTART_BUTTON, SCREEN_W, YES_PAD,
 };
 use crate::story::{full_mask, Story};
 use crate::trace;
@@ -126,6 +126,13 @@ fn story_touch<S: Story>(
     let n = story.hotspot_count(ch);
     let full = full_mask(n);
 
+    // A tap on the polaroid puts it aside, so the objects are back.
+    if m.photo_ms.is_some() && PHOTO_CARD.contains(p) {
+        m.photo_ms = None;
+        fx.redraw = true;
+        return;
+    }
+
     // Did she tap an object?
     for i in 0..n.min(8) {
         if story.hotspot_rect(ch, i).contains(p) {
@@ -140,6 +147,10 @@ fn story_touch<S: Story>(
             fx.reveal = Some(idx);
             fx.redraw = true;
             fx.chapter_complete = found != full && new_found == full;
+            // The last object found: out comes the chapter's photo.
+            if fx.chapter_complete && story.has_photo(ch) {
+                m.photo_ms = Some(m.now_ms);
+            }
             return;
         }
     }
@@ -202,6 +213,10 @@ pub(crate) fn on_swipe<S: Story>(m: &mut Model, story: &S, swipe: Swipe, fx: &mu
                 found: full_mask(story.hotspot_count(back)),
                 shown: None,
             });
+            // Back on a finished page: its photo is out again.
+            if story.has_photo(back) {
+                m.photo_ms = Some(m.now_ms);
+            }
             fx.scene_changed = true;
             fx.redraw = true;
         }

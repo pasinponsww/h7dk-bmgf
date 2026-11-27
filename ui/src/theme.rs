@@ -39,6 +39,10 @@ pub const ICON_FILL: Rgb565 = rgb(0xF5, 0xA9, 0xBD);
 pub const SHADOW: Rgb565 = rgb(0xEF, 0xC9, 0xD4);
 /// The far, lighter half of that shadow, `#F7DDE5`.
 pub const SHADOW_SOFT: Rgb565 = rgb(0xF7, 0xDD, 0xE5);
+/// The white of a polaroid's frame, a little warm, `#FFFBF0` (kept apart
+/// from the dog's pure white fur, which 16-bit color would otherwise merge
+/// it with).
+pub const POLAROID: Rgb565 = rgb(0xFF, 0xFB, 0xF0);
 /// Quiet text: hints and buttons that do not work yet, `#8C858E`.
 pub const MUTED: Rgb565 = rgb(0x8C, 0x85, 0x8E);
 /// Text on an [`ICON`]-colored button: the background pink.

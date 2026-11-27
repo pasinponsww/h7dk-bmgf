@@ -17,6 +17,10 @@ line = "Tap an object to read its line. Find them all to go on."
 [[chapter]]
 title = "Something together"
 mood = "happy"
+# A photo next to story.toml (jpg or png). Once every object on the page is
+# found it develops as a polaroid: 128 x 128 on the screen, 32 KB of flash.
+photo = "photo.png"
+caption = "us <3"
 
 [[chapter.object]]
 icon = "calendar-heart"

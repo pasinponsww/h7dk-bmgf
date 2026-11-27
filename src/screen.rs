@@ -22,12 +22,13 @@ use embedded_graphics::Drawable;
 use ui::frame::Scaled;
 use ui::icon::{Icon, Tones};
 use ui::mascot::{self, Mood};
+use ui::photo::Photo;
 use ui::{backdrop, heart as heart_shape, theme};
 
 use crate::event::Effects;
 use crate::fonts::{PRESS_START, VT323};
 use crate::state::{
-    dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, RESTART_BUTTON, SCREEN_W,
+    dog_rect, dog_spot, Model, Scene, MAX_DODGES, NEXT_BUTTON, PHOTO_CARD, RESTART_BUTTON, SCREEN_W,
 };
 use crate::story::{full_mask, Content, CHAPTERS, ENDING, TRACE};
 use crate::trace::{self, DOTS, DOT_AT};
@@ -47,6 +48,10 @@ const MESSAGE_DELAY_MS: u32 = 300;
 pub const FADE_MS: u32 = 450;
 /// How long the heart wipe takes to open a new scene.
 pub const WIPE_MS: u32 = 700;
+/// How long a polaroid takes to drop into place.
+const DROP_MS: u32 = 350;
+/// How long its photo then takes to develop from a blank.
+const DEVELOP_MS: u32 = 2_600;
 
 /// Half the sticker's size: it is placed by its middle.
 const STICKER_HALF: i16 = 24;
@@ -390,18 +395,22 @@ impl Painter {
         }
         self.trail(target, ch, y + 4)?;
 
-        // The objects.
+        // The objects, or the chapter's polaroid once they are all found.
         let n = page.hotspots.len();
-        for (i, h) in page.hotspots.iter().enumerate() {
-            let Ok(idx) = u8::try_from(i) else { break };
-            self.object(
-                target,
-                h.rect,
-                h.art,
-                idx,
-                found & (1 << i) != 0,
-                shown == Some(idx),
-            )?;
+        if let Some((photo, age)) = page.photo.zip(self.model.photo_for(self.t_ms)) {
+            polaroid(target, photo, page.caption, age)?;
+        } else {
+            for (i, h) in page.hotspots.iter().enumerate() {
+                let Ok(idx) = u8::try_from(i) else { break };
+                self.object(
+                    target,
+                    h.rect,
+                    h.art,
+                    idx,
+                    found & (1 << i) != 0,
+                    shown == Some(idx),
+                )?;
+            }
         }
 
         // The card with the revealed line, or a hint.
@@ -909,6 +918,41 @@ where
     RoundedRectangle::with_equal_corners(area, Size::new(radius, radius))
         .into_styled(style.build())
         .draw(target)
+}
+
+/// How far a polaroid that came out `age` ms ago has developed, in
+/// fifteenths: nothing while it drops in, then slowly at first.
+fn developed(age: u32) -> u8 {
+    let Some(t) = age.checked_sub(DROP_MS) else {
+        return 0;
+    };
+    let p = t.min(DEVELOP_MS) * 1_000 / DEVELOP_MS;
+    u8::try_from(15 * p * p / 1_000_000).unwrap_or(15)
+}
+
+/// A chapter's photo as a polaroid: a warm white frame with the photo in
+/// it, the caption under it and a strip of pink tape over the top. It drops
+/// in from above, then the photo develops like an instant photo.
+fn polaroid<D>(target: &mut D, photo: &Photo, caption: &str, age: u32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let drop = DROP_MS.saturating_sub(age) * 60 / DROP_MS;
+    let card = lowered(PHOTO_CARD, -to_i16(to_i32_u(drop)));
+    shadow(target, card, 4)?;
+    rounded(target, card, 4, theme::POLAROID, Some((theme::MAUVE, 1)))?;
+    let (x, y) = (i32::from(card.x), i32::from(card.y));
+    photo.draw(target, GPoint::new(x + 8, y + 8), developed(age))?;
+    let cx = x + i32::from(card.w) / 2;
+    if !caption.is_empty() {
+        let at = GPoint::new(cx - text_width(caption, &VT323) / 2, y + 8 + 128 + 6);
+        font_text(target, caption, at, &VT323, 1, theme::TEXT)?;
+    }
+    let tape = Rectangle::new(GPoint::new(cx - 24, y - 7), Size::new(48, 15));
+    if visible(target, &tape) {
+        target.fill_solid(&tape, theme::TILE)?;
+    }
+    Ok(())
 }
 
 /// `r` moved down by `dy` pixels.
@@ -1653,6 +1697,65 @@ mod tests {
                 "({x}, {y})"
             );
         }
+    }
+
+    #[test]
+    fn finding_everything_brings_out_the_chapter_photo_which_can_be_put_aside() {
+        let story = Content;
+        let ch = (0..story.chapter_count())
+            .find(|&c| story.has_photo(c))
+            .expect("the default story has a photo");
+        let mut rng = XorShift32::new(5);
+        let mut m = Model::new(0);
+        let mut tap = |m: &mut Model, x: i16, y: i16| {
+            update(
+                m,
+                &story,
+                &mut rng,
+                Event::Touch(TouchEvent::Down(Point::new(x, y))),
+            )
+        };
+        tap(&mut m, 300, 30);
+        for c in 0..ch {
+            for i in 0..story.hotspot_count(c) {
+                let r = story.hotspot_rect(c, i);
+                tap(&mut m, r.x + 4, r.y + 4);
+            }
+            tap(&mut m, NEXT_BUTTON.x + 4, NEXT_BUTTON.y + 4);
+        }
+        for i in 0..story.hotspot_count(ch) {
+            assert_eq!(m.photo_for(m.now_ms), None, "not before the last object");
+            let r = story.hotspot_rect(ch, i);
+            tap(&mut m, r.x + 4, r.y + 4);
+        }
+        assert_eq!(m.photo_for(m.now_ms), Some(0), "out it comes");
+
+        let mut p = Painter::new();
+        let mut white = |m: &Model, t: u32| {
+            p.prepare(m, &Cues::new(), t);
+            let f = full_frame(&p);
+            let raw = theme::to_raw(theme::POLAROID);
+            let (x0, y0) = (PHOTO_CARD.x as usize, PHOTO_CARD.y as usize);
+            (y0..y0 + PHOTO_CARD.h as usize)
+                .flat_map(|y| (x0..x0 + PHOTO_CARD.w as usize).map(move |x| y * WIDTH + x))
+                .filter(|&i| f[i] == raw)
+                .count()
+        };
+        let t = m.now_ms + WIPE_MS + DROP_MS + DEVELOP_MS;
+        assert!(white(&m, t) > 3_000, "the frame is up");
+        tap(&mut m, PHOTO_CARD.x + 20, PHOTO_CARD.y + 20);
+        assert_eq!(m.photo_for(m.now_ms), None, "put aside");
+        assert_eq!(white(&m, t), 0, "and the objects are back");
+    }
+
+    #[test]
+    fn a_polaroid_develops_slowly_then_all_at_once() {
+        assert_eq!(developed(0), 0);
+        assert_eq!(developed(DROP_MS), 0, "blank as it lands");
+        let half = developed(DROP_MS + DEVELOP_MS / 2);
+        assert!((2..=5).contains(&half), "{half}");
+        assert_eq!(developed(DROP_MS + DEVELOP_MS), 15);
+        assert_eq!(developed(u32::MAX / 2), 15);
     }
 
     #[test]

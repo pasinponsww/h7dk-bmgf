@@ -360,6 +360,87 @@ fn icon_ident(name: &str) -> String {
     format!("ICON_{}", name.to_uppercase().replace('-', "_"))
 }
 
+/// Photos are baked at this many pixels square (about 32 KB of flash each).
+const PHOTO_PX: u32 = 128;
+
+/// Floyd-Steinberg dithering from 8 bits per channel to RGB565: the rounding
+/// error of each pixel is pushed onto its neighbors, so gradients (skin, sky)
+/// stay smooth instead of banding.
+fn dither_rgb565(rgb: &[[u8; 3]], w: usize, h: usize) -> Vec<u16> {
+    let mut work: Vec<[f32; 3]> = rgb
+        .iter()
+        .map(|p| [f32::from(p[0]), f32::from(p[1]), f32::from(p[2])])
+        .collect();
+    let mut out = vec![0u16; w * h];
+    let levels = [31.0f32, 63.0, 31.0];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let mut q = [0u16; 3];
+            let mut err = [0f32; 3];
+            for c in 0..3 {
+                let v = work[i][c].clamp(0.0, 255.0);
+                let n = (v * levels[c] / 255.0).round();
+                q[c] = n as u16;
+                err[c] = v - n * 255.0 / levels[c];
+            }
+            out[i] = q[0] << 11 | q[1] << 5 | q[2];
+            let mut push = |dx: isize, dy: usize, share: f32| {
+                let nx = x as isize + dx;
+                if nx < 0 || nx >= w as isize || y + dy >= h {
+                    return;
+                }
+                let j = (y + dy) * w + nx as usize;
+                for c in 0..3 {
+                    work[j][c] += err[c] * share;
+                }
+            };
+            push(1, 0, 7.0 / 16.0);
+            push(-1, 1, 3.0 / 16.0);
+            push(0, 1, 5.0 / 16.0);
+            push(1, 1, 1.0 / 16.0);
+        }
+    }
+    out
+}
+
+/// Bakes the photo `file` (in the story folder) into `out/photos/<ident>.bin`:
+/// cut to a centered square, shrunk to [`PHOTO_PX`] and dithered to RGB565,
+/// low byte first. Returns the Rust static that holds it.
+fn bake_photo(story_dir: &Path, out: &Path, file: &str, label: &str, ident: &str) -> String {
+    let path = story_dir.join(file);
+    println!("cargo:rerun-if-changed={}", path.display());
+    let img = image::open(&path)
+        .unwrap_or_else(|e| {
+            fail(&format!(
+                "{label}: cannot open the photo {}: {e}",
+                path.display()
+            ))
+        })
+        .to_rgb8();
+    let (w, h) = img.dimensions();
+    let side = w.min(h);
+    let square =
+        image::imageops::crop_imm(&img, (w - side) / 2, (h - side) / 2, side, side).to_image();
+    let small = image::imageops::resize(
+        &square,
+        PHOTO_PX,
+        PHOTO_PX,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let rgb: Vec<[u8; 3]> = small.pixels().map(|p| p.0).collect();
+    let px = dither_rgb565(&rgb, PHOTO_PX as usize, PHOTO_PX as usize);
+    let bytes: Vec<u8> = px.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let dir = out.join("photos");
+    fs::create_dir_all(&dir).expect("could not create the photo folder");
+    let bin = dir.join(format!("{}.bin", ident.to_lowercase()));
+    fs::write(&bin, bytes).expect("could not write a photo");
+    let bin = bin.display().to_string();
+    format!(
+        "static {ident}: ui::photo::Photo = ui::photo::Photo::new({PHOTO_PX}, include_bytes!({bin:?}));\n"
+    )
+}
+
 fn write_story_table(root: &Path, out: &Path) {
     println!("cargo:rerun-if-env-changed=H7_STORY");
     let name = env::var("H7_STORY").unwrap_or_else(|_| "default".to_string());
@@ -398,6 +479,7 @@ fn write_story_table(root: &Path, out: &Path) {
         .filter(|name| icons.join(format!("{name}.svg")).is_file());
     let baked = bake_icons(&icons, out, used);
 
+    let mut photos = String::new();
     let mut code = String::new();
     for line in baked.values() {
         code.push_str(line);
@@ -428,10 +510,19 @@ fn write_story_table(root: &Path, out: &Path) {
         }
 
         let mood = limited(table, "mood", 12, &label).unwrap_or("");
+        let caption = limited(table, "caption", 16, &label).unwrap_or("");
+        let photo = match text(table, "photo") {
+            Some(file) => {
+                let ident = format!("PHOTO_{}", ci + 1);
+                photos.push_str(&bake_photo(&dir, out, file, &label, &ident));
+                format!("Some(&{ident})")
+            }
+            None => "None".to_string(),
+        };
 
         writeln!(
             code,
-            "    Chapter {{ title: {title:?}, mood: {mood:?}, hotspots: &["
+            "    Chapter {{ title: {title:?}, mood: {mood:?}, photo: {photo}, caption: {caption:?}, hotspots: &["
         )
         .unwrap();
         for (oi, object) in objects.iter().enumerate() {
@@ -467,6 +558,7 @@ fn write_story_table(root: &Path, out: &Path) {
         writeln!(code, "    ] }},").unwrap();
     }
     writeln!(code, "];\n").unwrap();
+    code.push_str(&photos);
     code.push_str(&ending_code(&doc));
     code.push_str(&trace_code(&doc));
 

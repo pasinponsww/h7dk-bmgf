@@ -47,6 +47,9 @@ pub const PET_MS: u32 = 1_800;
 pub const ATTRACT_AFTER_MS: u32 = 30_000;
 /// A finished heart stays on screen this long before the question opens.
 pub const TRACE_ADMIRE_MS: u32 = 1_400;
+/// Where a chapter's polaroid sits once every object is found: over the
+/// objects, a white frame round a 128 x 128 photo with room for a caption.
+pub const PHOTO_CARD: Rect = Rect::new(286, 24, 144, 172);
 /// The dog sprite's size in sprite pixels (see `ui::mascot`).
 const DOG_W: i16 = 34;
 const DOG_H: i16 = 40;
@@ -118,6 +121,8 @@ pub struct Model {
     pub(crate) pen: Option<Point>,
     /// When the heart was finished.
     pub(crate) traced_ms: Option<u32>,
+    /// When the chapter's polaroid came out, while it is showing.
+    pub(crate) photo_ms: Option<u32>,
 }
 
 impl Model {
@@ -136,6 +141,7 @@ impl Model {
             petted_ms: None,
             pen: None,
             traced_ms: None,
+            photo_ms: None,
         }
     }
 
@@ -150,6 +156,7 @@ impl Model {
         self.petted_ms = None;
         self.pen = None;
         self.traced_ms = None;
+        self.photo_ms = None;
         if scene == Scene::Question {
             self.dodges = 0;
             self.no_rect = INITIAL_NO;
@@ -166,6 +173,11 @@ impl Model {
     pub fn petted_for(&self, now_ms: u32) -> Option<u32> {
         let since = now_ms.wrapping_sub(self.petted_ms?);
         (since < PET_MS).then_some(since)
+    }
+
+    /// Milliseconds since the chapter's polaroid came out, while it shows.
+    pub fn photo_for(&self, now_ms: u32) -> Option<u32> {
+        Some(now_ms.wrapping_sub(self.photo_ms?))
     }
 
     /// Milliseconds since the heart was finished, if it has been.

@@ -12,6 +12,9 @@ Folders other than `default/` are yours to keep private: add them to `.gitignore
 [[chapter]]
 title = "The beginning"      # big title of the page
 mood = "wow"                 # optional: how the mascot dog feels on this page
+photo = "us.jpg"             # optional: a jpg or png in this folder, shown as a
+                             # polaroid once every object is found (32 KB of flash)
+caption = "summer 2025"      # optional: up to 16 characters under the photo
 
 [[chapter.object]]           # 2 to 4 tappable objects per chapter
 icon = "door"                # a file name in assets/icons/phosphor/duotone

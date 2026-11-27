@@ -1,6 +1,7 @@
 //! The story: what the logic needs to know about it, and the story itself.
 use geometry::Rect;
 use ui::icon::Icon;
+use ui::photo::Photo;
 
 /// Read-only view of the story.
 pub trait Story {
@@ -13,6 +14,11 @@ pub trait Story {
     /// True if she draws a heart (see `crate::trace`) between the last
     /// chapter and the question.
     fn trace_heart(&self) -> bool {
+        false
+    }
+    /// True if a chapter has a photo that shows once every object is found.
+    fn has_photo(&self, chapter: usize) -> bool {
+        let _ = chapter;
         false
     }
 }
@@ -53,6 +59,10 @@ pub struct Chapter {
     pub title: &'static str,
     /// Name of the mascot mood on this page, or empty for the default.
     pub mood: &'static str,
+    /// A photo that develops as a polaroid once every object is found.
+    pub photo: Option<&'static Photo>,
+    /// Written under the photo, or empty.
+    pub caption: &'static str,
     /// Its tappable objects.
     pub hotspots: &'static [Hotspot],
 }
@@ -146,6 +156,9 @@ impl Story for Content {
     }
     fn trace_heart(&self) -> bool {
         TRACE.enabled
+    }
+    fn has_photo(&self, chapter: usize) -> bool {
+        CHAPTERS.get(chapter).is_some_and(|c| c.photo.is_some())
     }
 }
 
