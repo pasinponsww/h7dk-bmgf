@@ -239,6 +239,20 @@ const PANEL: DisplayConfiguration = DisplayConfiguration {
     pixel_clock_pol: true,
 };
 
+/// Values the LCD controller's line counter (LTDC_CPSR.CYPOS) runs through
+/// in one refresh: sync, back porch, the visible rows and the front porch.
+pub const SCAN_LINES: u16 =
+    PANEL.v_sync + PANEL.v_back_porch + PANEL.active_height + PANEL.v_front_porch;
+/// The counter value of the first visible row.
+pub const SCAN_ACTIVE_START: u16 = PANEL.v_sync + PANEL.v_back_porch;
+/// How long one line takes, in nanoseconds.
+pub const SCAN_LINE_NS: u32 = ((PANEL.h_sync as u64
+    + PANEL.h_back_porch as u64
+    + PANEL.active_width as u64
+    + PANEL.h_front_porch as u64)
+    * 1_000_000_000
+    / PIXEL_CLOCK_HZ as u64) as u32;
+
 /// Display object
 pub struct Display {
     framebuffer: &'static mut [u16; LCD_PIXELS],
@@ -267,6 +281,15 @@ impl Display {
     /// Helper function to get a mutable slice of the framebuffer
     pub fn framebuffer(&mut self) -> &mut [u16] {
         &mut self.framebuffer[..]
+    }
+
+    /// The line the LCD controller is reading right now, counting from the
+    /// start of the sync lines (see [`SCAN_LINES`] and [`SCAN_ACTIVE_START`]).
+    #[allow(unsafe_code)]
+    pub fn scan_line() -> u16 {
+        // SAFETY: reads a read-only status register. The LTDC is clocked and
+        // set up before a `Display` exists, which is the only way to reach this.
+        unsafe { (*pac::LTDC::ptr()).cpsr.read().cypos().bits() }
     }
 
     /// Turns the backlight on or off.

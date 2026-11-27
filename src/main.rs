@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use defmt_rtt as _;
 use panic_probe as _;
 
+use app::pacing::Timing;
 use app::state::{NEXT_BUTTON, RESTART_BUTTON};
 use app::story::Content;
 use app::{Model, Point, Rect, Scene, Story};
@@ -17,8 +18,19 @@ systick_monotonic!(Mono, 1_000);
 const TICK_MS: u32 = 16;
 /// Holding the blue button this long goes back to the beginning.
 const LONG_PRESS_MS: u32 = 1_000;
-/// How often the screen is drawn again, in milliseconds (about 30 frames a second).
+/// How often the screen is drawn again, in milliseconds (about 30 frames a
+/// second), if the LCD controller's line counter cannot be followed.
 const FRAME_MS: u32 = 33;
+/// After a frame starts, the render task sleeps this long and then waits for
+/// the top of the next LCD refresh. A refresh takes 16.8 ms, so frames start
+/// on every second refresh: 29.7 frames a second.
+const FRAME_LEAD_MS: u32 = 30;
+/// The LCD controller's line counter on this panel.
+const SCAN: Timing = Timing {
+    active_start: bsp::SCAN_ACTIVE_START,
+    lines: bsp::SCAN_LINES,
+    line_ns: bsp::SCAN_LINE_NS,
+};
 /// Rows drawn at a time. Each finished band is copied into the framebuffer.
 const BAND_ROWS: usize = 16;
 /// Pixels in one band.
@@ -72,11 +84,33 @@ fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
+/// Waits for the blank lines at the top of the next LCD refresh: sleeps
+/// through most of the wait, then watches the line counter. Returns false if
+/// the counter never got there within two refreshes (the LCD is not running).
+async fn wait_for_top_blank() -> bool {
+    let start = now_ms();
+    let give_up_ms = 2 * SCAN.refresh_us() / 1_000 + 5;
+    loop {
+        let line = bsp::Display::scan_line();
+        if SCAN.in_top_blank(line) {
+            return true;
+        }
+        if now_ms().wrapping_sub(start) > give_up_ms {
+            return false;
+        }
+        let us = SCAN.us_until_top(line);
+        if us > 1_500 {
+            Mono::delay((us / 1_000 - 1).millis()).await;
+        }
+    }
+}
+
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
     use app::frame_stats::FrameStats;
     use app::leds::Dither;
     use app::liveness::Liveness;
+    use app::pacing::Racer;
     use app::screen::{Cues, Painter};
     use app::story::Content;
     use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
@@ -86,8 +120,8 @@ mod firmware {
     use ui::frame::Band;
 
     use super::{
-        log_scene, next_tap, now_ms, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_MS,
-        LED_LEVELS, LONG_PRESS_MS, TICK_MS,
+        log_scene, next_tap, now_ms, wait_for_top_blank, Mono, Ordering, BAND_LEN, BAND_ROWS,
+        FRAMES, FRAME_LEAD_MS, FRAME_MS, LED_LEVELS, LONG_PRESS_MS, SCAN, TICK_MS,
     };
 
     #[shared]
@@ -104,6 +138,9 @@ mod firmware {
         touch: Touch,
         display: Display,
         stats: FrameStats,
+        /// The longest a band waits for the LCD controller, in CPU cycles
+        /// (one refresh).
+        max_wait: u32,
         watchdog: Watchdog,
         liveness: Liveness,
         rng: XorShift32,
@@ -163,6 +200,7 @@ mod firmware {
                 touch,
                 display,
                 stats: FrameStats::new(core_clock_hz, 0),
+                max_wait: SCAN.refresh_us() * (core_clock_hz / 1_000_000),
                 watchdog,
                 liveness: Liveness::new(0),
                 // A new seed from the hardware RNG on every start-up, so the
@@ -279,17 +317,27 @@ mod firmware {
         all.nudge = f.nudge.or(all.nudge);
     }
 
-    /// Draws the screen about 30 times a second, one band of rows at a time.
+    /// Draws the screen on every second LCD refresh (about 30 times a second),
+    /// one band of rows at a time. Each band is copied into the framebuffer
+    /// only once the LCD controller has read past it, so no refresh shows half
+    /// of one frame and half of the next (see `app::pacing`).
     #[task(priority = 1, shared = [model, cues], local = [
         display,
         stats,
+        max_wait,
         painter: Painter = Painter::new(),
         band: [u16; BAND_LEN] = [0; BAND_LEN],
         first: bool = true,
+        in_step: bool = true,
     ])]
     async fn render(mut cx: render::Context) {
-        let mut next = Mono::now();
         loop {
+            if *cx.local.in_step && !wait_for_top_blank().await {
+                *cx.local.in_step = false;
+                defmt::warn!("lcd: line counter not moving, drawing without waiting for it");
+            }
+            let in_step = *cx.local.in_step;
+            let frame_start = Mono::now();
             let started = now_ms();
             let model = cx.shared.model.lock(|m| *m);
             let cues = cx.shared.cues.lock(|c| *c);
@@ -297,6 +345,8 @@ mod firmware {
             painter.prepare(&model, &cues, started);
 
             let band = &mut cx.local.band[..];
+            let max_wait = *cx.local.max_wait;
+            let mut racer = Racer::new(SCAN, Display::scan_line());
             let (mut draw, mut copy) = (0u32, 0u32);
             for (i, rows) in cx
                 .local
@@ -309,10 +359,18 @@ mod firmware {
                 let mut target = Band::new(&mut band[..rows.len()], i * BAND_ROWS);
                 let _ = painter.draw(&mut target);
                 let t1 = DWT::cycle_count();
-                rows.copy_from_slice(target.pixels());
+                // Wait until the LCD controller has read past this band.
+                let bottom = u16::try_from((i + 1) * BAND_ROWS).unwrap_or(u16::MAX);
+                while in_step && !racer.may_copy(Display::scan_line(), bottom) {
+                    if DWT::cycle_count().wrapping_sub(t1) > max_wait {
+                        break;
+                    }
+                }
                 let t2 = DWT::cycle_count();
+                rows.copy_from_slice(target.pixels());
+                let t3 = DWT::cycle_count();
                 draw = draw.wrapping_add(t1.wrapping_sub(t0));
-                copy = copy.wrapping_add(t2.wrapping_sub(t1));
+                copy = copy.wrapping_add(t3.wrapping_sub(t2));
             }
 
             FRAMES.fetch_add(1, Ordering::Relaxed);
@@ -335,12 +393,8 @@ mod firmware {
                 );
             }
 
-            next += FRAME_MS.millis();
-            let now = Mono::now();
-            if next < now {
-                next = now;
-            }
-            Mono::delay_until(next).await;
+            let lead = if in_step { FRAME_LEAD_MS } else { FRAME_MS };
+            Mono::delay_until(frame_start + lead.millis()).await;
         }
     }
 }
