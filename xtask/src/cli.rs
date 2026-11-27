@@ -98,6 +98,19 @@ pub enum MbeddedCmd {
     Reset,
     /// Show the connected board
     Detect,
+    /// Turn a folder of photos into an album and write it to the board's
+    /// 64 MB flash (shown as a slideshow on the celebration screen)
+    Photos {
+        /// Folder with .jpg, .jpeg or .png files (the first 64, by name)
+        folder: std::path::PathBuf,
+        /// Only make target/album.bin; do not write it to the board
+        #[arg(long)]
+        no_flash: bool,
+        /// STM32CubeProgrammer external loader for the board's flash, if it
+        /// is not found next to the programmer
+        #[arg(long)]
+        loader: Option<std::path::PathBuf>,
+    },
 }
 
 #[cfg(test)]
@@ -154,6 +167,10 @@ mod tests {
         assert!(matches!(mbedded(&["attach"]), MbeddedCmd::Attach { .. }));
         assert!(matches!(mbedded(&["reset"]), MbeddedCmd::Reset));
         assert!(matches!(mbedded(&["detect"]), MbeddedCmd::Detect));
+        assert!(matches!(
+            mbedded(&["photos", "pics", "--no-flash"]),
+            MbeddedCmd::Photos { no_flash: true, .. }
+        ));
     }
 
     #[test]

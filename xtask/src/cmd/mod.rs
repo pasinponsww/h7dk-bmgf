@@ -1,10 +1,11 @@
 //! The commands, grouped by what they work on, and the router that picks one:
 //!
 //! - `common`: status, setup (`health`), test, check, fmt (`quality`)
-//! - `mbedded`: build, flash, run, attach, reset, detect (`board`)
+//! - `mbedded`: build, flash, run, attach, reset, detect (`board`), photos (`photos`)
 
 pub mod board;
 pub mod health;
+pub mod photos;
 pub mod quality;
 
 use crate::cli::{Cli, Cmd, CommonCmd, MbeddedCmd};
@@ -31,6 +32,11 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             MbeddedCmd::Attach { dev } => board::attach(!dev),
             MbeddedCmd::Reset => board::reset(),
             MbeddedCmd::Detect => board::detect(),
+            MbeddedCmd::Photos {
+                folder,
+                no_flash,
+                loader,
+            } => photos::photos(&folder, no_flash, loader),
         },
     }
 }
