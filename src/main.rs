@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use defmt_rtt as _;
 use panic_probe as _;
 
@@ -58,21 +60,27 @@ fn log_scene(model: &Model) {
     }
 }
 
+/// Frames the render task has finished. The tick task reads it to decide
+/// whether to feed the watchdog (see `app::liveness`).
+static FRAMES: AtomicU32 = AtomicU32::new(0);
+
 fn now_ms() -> u32 {
     Mono::now().duration_since_epoch().to_millis()
 }
 
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
+    use app::liveness::Liveness;
     use app::screen::{Cues, Painter};
     use app::story::Content;
     use app::{update, Effects, Event, Model, Point, TouchEvent, XorShift32};
-    use bsp::{Board, Button, Display, Leds, Touch};
+    use bsp::{Board, Button, Display, Leds, Touch, Watchdog};
     use rtic_monotonics::systick::prelude::*;
     use ui::frame::Band;
 
     use super::{
-        log_scene, next_tap, now_ms, Mono, BAND_LEN, BAND_ROWS, FRAME_MS, LONG_PRESS_MS, TICK_MS,
+        log_scene, next_tap, now_ms, Mono, Ordering, BAND_LEN, BAND_ROWS, FRAMES, FRAME_MS,
+        LONG_PRESS_MS, TICK_MS,
     };
 
     #[shared]
@@ -87,6 +95,8 @@ mod firmware {
         button: Button,
         touch: Touch,
         display: Display,
+        watchdog: Watchdog,
+        liveness: Liveness,
         rng: XorShift32,
         /// When the blue button went down, while it is held.
         pressed_since: Option<u32>,
@@ -108,9 +118,14 @@ mod firmware {
             button,
             display,
             touch,
+            watchdog,
+            reset_by_watchdog,
             core_clock_hz,
             seed,
         } = Board::init(cx.device);
+        if reset_by_watchdog {
+            defmt::warn!("started again after a hang");
+        }
         defmt::info!("core clock {} Hz", core_clock_hz);
 
         Mono::start(core.SYST, core_clock_hz);
@@ -131,6 +146,8 @@ mod firmware {
                 button,
                 touch,
                 display,
+                watchdog,
+                liveness: Liveness::new(0),
                 // A new seed from the hardware RNG on every start-up, so the
                 // NO button runs a different way each time.
                 rng: XorShift32::new(seed),
@@ -142,7 +159,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [leds, button, touch, rng, pressed_since, long_press_done, was_touching])]
+    #[task(priority = 2, shared = [model, cues], local = [leds, button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -150,6 +167,11 @@ mod firmware {
             next += TICK_MS.millis();
             Mono::delay_until(next).await;
             let now = now_ms();
+
+            // Feed the watchdog only while the screen keeps drawing too.
+            if cx.local.liveness.alive(FRAMES.load(Ordering::Relaxed), now) {
+                cx.local.watchdog.feed();
+            }
 
             // A finger that just touched the glass is a tap.
             let finger = cx.local.touch.read();
@@ -257,6 +279,8 @@ mod firmware {
                 let _ = painter.draw(&mut target);
                 rows.copy_from_slice(target.pixels());
             }
+
+            FRAMES.fetch_add(1, Ordering::Relaxed);
 
             if *cx.local.first {
                 *cx.local.first = false;

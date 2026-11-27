@@ -11,8 +11,9 @@ use stm32h7xx_hal::gpio::{
 };
 use stm32h7xx_hal::hal::blocking::i2c::{Write, WriteRead};
 use stm32h7xx_hal::i2c::{self, I2c};
+use stm32h7xx_hal::independent_watchdog::IndependentWatchdog;
 use stm32h7xx_hal::ltdc::{Ltdc, LtdcLayer1};
-use stm32h7xx_hal::rcc::PllConfigStrategy;
+use stm32h7xx_hal::rcc::{PllConfigStrategy, ResetReason};
 use stm32h7xx_hal::rng::RngExt;
 use stm32h7xx_hal::{pac, prelude::*};
 
@@ -25,6 +26,9 @@ pub struct Board {
     pub button: Button,
     pub display: Display,
     pub touch: Touch,
+    pub watchdog: Watchdog,
+    /// The last restart was the watchdog's doing: something hung.
+    pub reset_by_watchdog: bool,
     pub core_clock_hz: u32,
     /// 32 truly random bits from the chip's hardware random number generator,
     /// different on every start-up. Seed the app's random numbers with it.
@@ -57,7 +61,11 @@ impl Board {
                 .set_bit()
         });
 
-        step("debug clocks kept on in sleep");
+        // Pause the watchdog while the debugger has the core halted, so
+        // stepping through code does not restart the board.
+        dp.DBGMCU.apb4fz1.modify(|_, w| w.dbg_wdglsd1().set_bit());
+
+        step("debug clocks kept on in sleep, watchdog paused by the debugger");
 
         step("power: direct SMPS");
         // The STM32H735G-DK powers the core from the on-chip SMPS (as in the
@@ -65,9 +73,15 @@ impl Board {
         // can hang the HAL waiting for the voltage to settle.
         let power = dp.PWR.constrain().smps().freeze();
         step("power ok; clocks: 200 MHz from PLL1, LCD pixel clock from PLL3");
-        let clocks = dp
-            .RCC
-            .constrain()
+        let mut rcc = dp.RCC.constrain();
+        let reset_by_watchdog = matches!(
+            rcc.get_reset_reason(),
+            ResetReason::IndependentWatchdogReset | ResetReason::GenericWatchdogReset
+        );
+        if reset_by_watchdog {
+            defmt::warn!("init: the watchdog restarted the board (something hung)");
+        }
+        let clocks = rcc
             .sys_ck(200.MHz())
             .hclk(200.MHz())
             .pll3_strategy(PllConfigStrategy::Iterative)
@@ -131,12 +145,17 @@ impl Board {
         step("random seed (RNG)");
         let seed = random_seed(dp.RNG, clocks.peripheral.RNG, &clocks.clocks);
 
+        step("watchdog");
+        let watchdog = Watchdog::start(dp.IWDG1);
+
         step("board ready");
         Self {
             leds,
             button,
             display,
             touch,
+            watchdog,
+            reset_by_watchdog,
             core_clock_hz: clocks.clocks.c_ck().raw(),
             seed,
         }
@@ -494,6 +513,27 @@ impl Touch {
             })
         };
         self.last
+    }
+}
+
+/// Restarts the board unless it is fed at least this often.
+pub const WATCHDOG_MS: u32 = 2_000;
+
+/// The independent watchdog. It runs from its own clock, so it still restarts
+/// the board if the code hangs, faults or locks up the bus. Once started it
+/// cannot be stopped.
+pub struct Watchdog(IndependentWatchdog);
+
+impl Watchdog {
+    fn start(iwdg: pac::IWDG1) -> Self {
+        let mut w = IndependentWatchdog::new(iwdg);
+        w.start(WATCHDOG_MS.millis());
+        Self(w)
+    }
+
+    /// Tells the watchdog everything is fine for another [`WATCHDOG_MS`].
+    pub fn feed(&mut self) {
+        self.0.feed();
     }
 }
 
