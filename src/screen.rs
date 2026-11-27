@@ -14,8 +14,8 @@ use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::{DrawTarget, Point as GPoint, Primitive, Size};
 use embedded_graphics::primitives::{
-    Circle, Line as Segment, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, RoundedRectangle,
-    Triangle,
+    Circle, Ellipse, Line as Segment, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle,
+    RoundedRectangle, Triangle,
 };
 use embedded_graphics::text::{Baseline, Text};
 use embedded_graphics::{Drawable, Pixel};
@@ -228,6 +228,10 @@ pub struct Painter {
     album: Option<&'static [u8]>,
     /// `(sin, cos)` of each celebration heart's turn this frame.
     spin: [(i16, i16); SPINNERS],
+    /// How high the dog is off the ground, and how far it leans, this frame
+    /// (for its shadow).
+    lift: u8,
+    lean: i8,
     /// The secret message, once it has been opened.
     secret: Option<crate::secret::Opened>,
 }
@@ -249,6 +253,8 @@ impl Painter {
             glyphs: [0; backdrop::CELLS],
             album: None,
             spin: [(0, 32_767); SPINNERS],
+            lift: 0,
+            lean: 0,
             secret: None,
         }
     }
@@ -307,6 +313,8 @@ impl Painter {
             None => mascot::pose(mood(model, t_ms), since),
         };
         mascot::render(&pose, &mut self.dog);
+        self.lift = pose.lift;
+        self.lean = pose.dx;
     }
 
     /// Draws the prepared frame. Only the part inside the target's bounding
@@ -330,6 +338,7 @@ impl Painter {
             Scene::Celebration => self.celebration(target)?,
         }
         let (at, scale) = dog_place(&self.model);
+        self.dog_shadow(target, at, scale)?;
         self.draw_dog(target, at, scale)?;
         self.pet_hearts(target)?;
         self.sweat(target)?;
@@ -394,6 +403,44 @@ impl Painter {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A soft shadow on the ground under the dog: two ellipses, a light one
+    /// and a darker one inside it, a little to the right as if lit from the
+    /// upper left. When the dog jumps the shadow shrinks and fades, and it
+    /// follows the dog's shiver.
+    fn dog_shadow<D>(&self, target: &mut D, origin: GPoint, scale: u32) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        let s = to_i32_u(scale);
+        let lift = i32::from(self.lift.min(mascot::HEADROOM));
+        // In sprite pixels: 26 wide and 5 tall standing, 4 and 1 smaller per
+        // pixel of lift.
+        let w = (26 - 4 * lift) * s;
+        let h = (5 - lift).max(2) * s;
+        let cx = origin.x + (mascot::MIDDLE_X + i32::from(self.lean)) * s + s;
+        let ground = origin.y + to_i32(mascot::H) * s;
+        let ellipse = |w: i32, h: i32| {
+            Ellipse::new(
+                GPoint::new(cx - w / 2, ground - h / 2),
+                Size::new(to_u32_i(w), to_u32_i(h)),
+            )
+        };
+        let outer = ellipse(w + 4 * s, h + s);
+        if !visible(target, &outer.bounding_box()) {
+            return Ok(());
+        }
+        outer
+            .into_styled(PrimitiveStyle::with_fill(theme::SHADOW))
+            .draw(target)?;
+        // High in a jump, only the faint outer shadow is left.
+        if lift < 3 {
+            ellipse(w, h)
+                .into_styled(PrimitiveStyle::with_fill(theme::DOG_SHADOW))
+                .draw(target)?;
         }
         Ok(())
     }
@@ -2123,6 +2170,38 @@ mod tests {
         assert!(
             rose_text(&mut with, late) > rose_text(&mut plain, late) + 50,
             "the secret is up, in rose"
+        );
+    }
+
+    #[test]
+    fn the_dog_casts_a_shadow_that_shrinks_when_it_jumps() {
+        let m = Model::new(0);
+        // The widest row of shadow under the dog (the dog itself covers the
+        // shadow's upper half, so its width is what tells the size).
+        let widest = |t: u32| {
+            let mut p = Painter::new();
+            p.prepare(&m, &Cues::new(), t);
+            let f = full_frame(&p);
+            let (shade, soft) = (
+                theme::to_raw(theme::DOG_SHADOW),
+                theme::to_raw(theme::SHADOW),
+            );
+            (150..HEIGHT)
+                .map(|y| {
+                    (0..240)
+                        .filter(|&x| f[y * WIDTH + x] == shade || f[y * WIDTH + x] == soft)
+                        .count()
+                })
+                .max()
+                .unwrap_or(0)
+        };
+        let standing = widest(2_000);
+        assert!(standing > 90, "a shadow under the dog: {standing}");
+        // Jumping for attention, a little off the ground.
+        let jumping = widest(crate::state::ATTRACT_AFTER_MS + 260);
+        assert!(
+            jumping < standing,
+            "smaller in the air: {jumping} < {standing}"
         );
     }
 

@@ -37,6 +37,8 @@ pub const ICON: Rgb565 = rgb(0xA9, 0x50, 0x6B);
 pub const ICON_FILL: Rgb565 = rgb(0xF5, 0xA9, 0xBD);
 /// The close, darker half of the soft shadow under tiles and buttons, `#EFC9D4`.
 pub const SHADOW: Rgb565 = rgb(0xEF, 0xC9, 0xD4);
+/// The dog's shadow on the ground, a little deeper, `#E8BACA`.
+pub const DOG_SHADOW: Rgb565 = rgb(0xE8, 0xBA, 0xCA);
 /// The far, lighter half of that shadow, `#F7DDE5`.
 pub const SHADOW_SOFT: Rgb565 = rgb(0xF7, 0xDD, 0xE5);
 /// The white of a polaroid's frame, a little warm, `#FFFBF0` (kept apart

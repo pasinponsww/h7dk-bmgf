@@ -15,8 +15,11 @@ pub const CELLS: usize = W * H;
 pub const CLEAR: u8 = b'.';
 
 const MARGIN_X: i32 = 1;
-const HEADROOM: u8 = 4;
+/// Rows above the standing dog, for jumps.
+pub const HEADROOM: u8 = 4;
 const SPRITE_W: usize = 32;
+/// The column under the middle of the standing dog, in sprite pixels.
+pub const MIDDLE_X: i32 = MARGIN_X + SPRITE_W as i32 / 2;
 const SPRITE_H: usize = 36;
 
 const BASE: [&str; SPRITE_H] = [
