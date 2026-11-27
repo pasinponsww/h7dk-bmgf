@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod board;
+pub mod cache;
 
 pub use board::{
     Board, Button, Display, LedTimer, Leds, Touch, TouchPoint, Watchdog, LCD_HEIGHT, LCD_PIXELS,

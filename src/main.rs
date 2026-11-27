@@ -118,9 +118,9 @@ mod firmware {
     fn init(cx: init::Context) -> (Shared, Local) {
         defmt::info!("h7dk-fw boot");
         let mut core = cx.core;
-        // Instruction cache only: the data cache would hide new pixels from
-        // the LCD controller and log messages from the debugger.
-        core.SCB.enable_icache();
+        // Both caches. The framebuffer's memory is kept out of the data
+        // cache, so new pixels always reach the LCD controller.
+        bsp::cache::enable(&mut core.SCB, &mut core.CPUID, &mut core.MPU);
 
         let Board {
             leds,
