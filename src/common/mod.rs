@@ -1,5 +1,6 @@
 pub mod event;
 pub mod frame_stats;
+pub mod gesture;
 pub mod liveness;
 pub mod pacing;
 pub mod state;

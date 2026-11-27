@@ -18,6 +18,7 @@ pub fn update<S: Story, R: Rng>(m: &mut Model, story: &S, rng: &mut R, ev: Event
         }
         Event::Touch(TouchEvent::Down(p)) => touch::on_down(m, story, rng, p, &mut fx),
         Event::Touch(TouchEvent::Move(_) | TouchEvent::Up(_)) => {}
+        Event::Swipe(s) => touch::on_swipe(m, story, s, &mut fx),
         Event::Restart => touch::restart(m, &mut fx),
     }
     fx.leds = leds::output(m);

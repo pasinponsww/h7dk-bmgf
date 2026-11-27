@@ -5,6 +5,7 @@ use geometry::Point;
 use rng::Rng;
 
 use crate::event::Effects;
+use crate::gesture::Swipe;
 use crate::state::{
     dog_rect, Model, Scene, DODGE_RADIUS, FLASH_MS, GIVE_UP_W, JUMP_TRIES, MAX_DODGES, NEXT_BUTTON,
     NO_AREA, RESTART_BUTTON, SCREEN_W, YES_PAD,
@@ -97,22 +98,7 @@ fn story_touch<S: Story>(
 
     // Did she tap "Next"?
     if NEXT_BUTTON.contains(p) {
-        if found != full && !m.skip_ok {
-            fx.nudge = first_unfound(found, n);
-            return;
-        }
-        let next = ch + 1;
-        if next >= story.chapter_count() {
-            m.go(Scene::Question);
-        } else {
-            m.go(Scene::Story {
-                chapter: u8::try_from(next).unwrap_or(u8::MAX),
-                found: 0,
-                shown: None,
-            });
-        }
-        fx.scene_changed = true;
-        fx.redraw = true;
+        turn_page(m, story, ch, found, fx);
         return;
     }
 
@@ -120,6 +106,54 @@ fn story_touch<S: Story>(
         pet(m, fx);
     }
     // Anything else is a miss: the ripple is the only feedback.
+}
+
+/// "Next" on chapter `ch`: on to the next chapter or the question once every
+/// object is found (or the page has waited long enough), otherwise a hint.
+fn turn_page<S: Story>(m: &mut Model, story: &S, ch: usize, found: u8, fx: &mut Effects) {
+    let n = story.hotspot_count(ch);
+    if found != full_mask(n) && !m.skip_ok {
+        fx.nudge = first_unfound(found, n);
+        return;
+    }
+    let next = ch + 1;
+    if next >= story.chapter_count() {
+        m.go(Scene::Question);
+    } else {
+        m.go(Scene::Story {
+            chapter: u8::try_from(next).unwrap_or(u8::MAX),
+            found: 0,
+            shown: None,
+        });
+    }
+    fx.scene_changed = true;
+    fx.redraw = true;
+}
+
+/// A swipe on a story page turns it: to the left is "Next", to the right goes
+/// back a chapter, with its objects already found so she can read them again.
+/// Other scenes ignore swipes.
+pub(crate) fn on_swipe<S: Story>(m: &mut Model, story: &S, swipe: Swipe, fx: &mut Effects) {
+    m.last_touch_ms = m.now_ms;
+    let Scene::Story { chapter, found, .. } = m.scene else {
+        return;
+    };
+    let ch = usize::from(chapter);
+    match swipe {
+        Swipe::Left => turn_page(m, story, ch, found, fx),
+        Swipe::Right => {
+            let Some(back) = ch.checked_sub(1) else {
+                return;
+            };
+            m.go(Scene::Story {
+                chapter: u8::try_from(back).unwrap_or(0),
+                found: full_mask(story.hotspot_count(back)),
+                shown: None,
+            });
+            fx.scene_changed = true;
+            fx.redraw = true;
+        }
+    }
 }
 
 fn question_touch<R: Rng>(m: &mut Model, rng: &mut R, p: Point, fx: &mut Effects) {
@@ -169,6 +203,7 @@ fn celebrate(m: &mut Model, fx: &mut Effects) {
 #[cfg(test)]
 mod tests {
     use crate::common::testing::{story_state, Fake, Rig, CH0};
+    use crate::gesture::Swipe;
     use crate::state::{
         dog_rect, Scene, FLASH_MS, GIVE_UP_W, INITIAL_NO, MAX_DODGES, PET_MS, RESTART_BUTTON,
     };
@@ -343,6 +378,53 @@ mod tests {
         let fx = r.tap(330, 100);
         assert!(!fx.redraw && !fx.scene_changed);
         assert_eq!(r.m.scene, Scene::Celebration);
+    }
+
+    fn swipe(r: &mut Rig, s: Swipe) -> crate::Effects {
+        update(&mut r.m, &Fake, &mut r.rng, Event::Swipe(s))
+    }
+
+    #[test]
+    fn swiping_left_turns_the_page_like_next() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        let fx = swipe(&mut r, Swipe::Left);
+        assert_eq!(fx.nudge, Some(0), "locked: a hint instead");
+        assert_eq!(story_state(&r.m).0, 0);
+        for c in CH0 {
+            r.tap_rect(c);
+        }
+        let fx = swipe(&mut r, Swipe::Left);
+        assert!(fx.scene_changed);
+        assert_eq!(story_state(&r.m), (1, 0, None));
+    }
+
+    #[test]
+    fn swiping_right_goes_back_a_chapter_with_everything_found() {
+        let mut r = Rig::new();
+        r.tap(1, 1);
+        assert!(
+            !swipe(&mut r, Swipe::Right).scene_changed,
+            "nothing before chapter 1"
+        );
+        for c in CH0 {
+            r.tap_rect(c);
+        }
+        r.tap_next();
+        let fx = swipe(&mut r, Swipe::Right);
+        assert!(fx.scene_changed);
+        assert_eq!(story_state(&r.m), (0, 0b11, None));
+        assert!(r.m.next_unlocked(&Fake), "Next works again at once");
+    }
+
+    #[test]
+    fn swipes_do_nothing_outside_the_story() {
+        let mut r = Rig::new();
+        assert!(!swipe(&mut r, Swipe::Left).scene_changed);
+        assert_eq!(r.m.scene, Scene::Intro);
+        r.play_to_question();
+        assert!(!swipe(&mut r, Swipe::Right).scene_changed);
+        assert_eq!(r.m.scene, Scene::Question);
     }
 
     #[test]

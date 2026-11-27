@@ -2,6 +2,8 @@
 
 use geometry::Point;
 
+use crate::gesture::Swipe;
+
 /// Something the hardware layer reports.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -12,6 +14,8 @@ pub enum Event {
     },
     /// A touch on the screen.
     Touch(TouchEvent),
+    /// A finger swiped sideways across the screen and lifted.
+    Swipe(Swipe),
     /// Go back to the intro from wherever the story is (a long press on the
     /// blue button).
     Restart,

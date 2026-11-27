@@ -108,6 +108,7 @@ async fn wait_for_top_blank() -> bool {
 #[rtic::app(device = bsp::hal::pac, dispatchers = [SPI1, SPI2])]
 mod firmware {
     use app::frame_stats::FrameStats;
+    use app::gesture::{Gesture, Swipe};
     use app::leds::Dither;
     use app::liveness::Liveness;
     use app::pacing::Racer;
@@ -218,7 +219,7 @@ mod firmware {
     }
 
     /// Runs the logic: the clock, the touch panel and the blue button.
-    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching])]
+    #[task(priority = 2, shared = [model, cues], local = [button, touch, watchdog, liveness, rng, pressed_since, long_press_done, was_touching, gesture: Gesture = Gesture::new()])]
     async fn tick(mut cx: tick::Context) {
         let story = Content;
         let mut next = Mono::now();
@@ -236,6 +237,11 @@ mod firmware {
             let finger = cx.local.touch.read();
             let finger_down = finger.is_some() && !*cx.local.was_touching;
             *cx.local.was_touching = finger.is_some();
+            // A quick sideways move before the finger lifts is a swipe.
+            let swipe = cx
+                .local
+                .gesture
+                .update(finger.map(|t| Point::new(t.x, t.y)), now);
 
             // The blue button: a short press taps whatever is next, holding
             // it for a second goes back to the beginning.
@@ -261,7 +267,7 @@ mod firmware {
             }
 
             let rng = &mut *cx.local.rng;
-            let fx = cx.shared.model.lock(|model| {
+            let (fx, tap_turned) = cx.shared.model.lock(|model| {
                 let before = model.scene;
                 let mut fx = update(model, &story, rng, Event::Tick { now_ms: now });
                 let mut all = fx;
@@ -270,9 +276,11 @@ mod firmware {
                     merge(all, &f);
                     f
                 };
+                let mut tap_turned = false;
                 if let (true, Some(t)) = (finger_down, finger) {
                     defmt::info!("touch: raw {} -> screen ({}, {})", t.raw, t.x, t.y);
                     fx = tap(model, Point::new(t.x, t.y), &mut all);
+                    tap_turned = fx.scene_changed;
                 }
                 if button_tap {
                     let at = next_tap(model, &story);
@@ -284,12 +292,25 @@ mod firmware {
                     fx = update(model, &story, rng, Event::Restart);
                     merge(&mut all, &fx);
                 }
+                if let Some(s) = swipe {
+                    match s {
+                        Swipe::Left => defmt::info!("swipe: left"),
+                        Swipe::Right => defmt::info!("swipe: right"),
+                    }
+                    fx = update(model, &story, rng, Event::Swipe(s));
+                    merge(&mut all, &fx);
+                }
                 if model.scene != before || all.reveal.is_some() {
                     log_scene(model);
                 }
                 all.leds = fx.leds;
-                all
+                (all, tap_turned)
             });
+            // The tap that started this touch already turned the page, so
+            // the same touch must not turn it again as a swipe.
+            if tap_turned {
+                cx.local.gesture.cancel();
+            }
 
             if fx.chapter_complete {
                 defmt::info!("chapter complete");
